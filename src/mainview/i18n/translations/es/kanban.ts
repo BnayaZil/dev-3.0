@@ -37,6 +37,7 @@ const kanban = {
 	"createTask.branchChoiceTitle": "¿Desde qué rama iniciar la tarea?",
 	"createTask.branchChoiceBody": "El repositorio está ahora en {currentBranch}, pero la rama base de este proyecto es {baseBranch}.",
 	"createTask.branchChoiceRisk": "Si empiezas desde la rama actual, puedes arrastrar commits o cambios que pertenecen a otra tarea.",
+	"createTask.branchChoiceDirty": "El repo principal tiene cambios sin commit.",
 	"createTask.branchChoiceBase": "Usar rama base: {baseBranch}",
 	"createTask.branchChoiceCurrent": "Usar rama actual: {currentBranch}",
 	"createTask.reviewMode": "Esto es una revisión de PR",

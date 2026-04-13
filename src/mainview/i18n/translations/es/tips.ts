@@ -133,7 +133,7 @@ const tips = {
 	"tip.modalQuickDismiss.title": "Cierra diálogos rápidamente",
 	"tip.modalQuickDismiss.body": "Pulsa ESC o haz clic fuera del diálogo para cerrarlo. Si tienes texto sin guardar, verás una confirmación primero.",
 	"tip.autoFillBranch.title": "Revisa la rama inicial",
-	"tip.autoFillBranch.body": "Si la rama actual se auto-completa en el selector, Guardar te pide confirmarla antes de iniciar desde ella.",
+	"tip.autoFillBranch.body": "Si la rama actual se auto-completa en el selector, Guardar avisa antes de iniciar desde ella y también marca si el repo principal está dirty.",
 	"tip.taskOpenMode.title": "Modo terminal de pantalla completa",
 	"tip.taskOpenMode.body": "Activa «Pantalla completa» en Modo de apertura de tarea (Ajustes globales) para abrir tareas sin vista dividida.",
 	"tip.forkBranchSupport.title": "Revisa PRs de forks",

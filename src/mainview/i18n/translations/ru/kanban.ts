@@ -37,6 +37,7 @@ const kanban = {
 	"createTask.branchChoiceTitle": "С какой ветки начать задачу?",
 	"createTask.branchChoiceBody": "Сейчас репозиторий стоит на {currentBranch}, а базовая ветка проекта — {baseBranch}.",
 	"createTask.branchChoiceRisk": "Если стартовать с текущей ветки, в новую задачу могут приехать коммиты или изменения от другой работы.",
+	"createTask.branchChoiceDirty": "В main repo есть незакоммиченные изменения.",
 	"createTask.branchChoiceBase": "Использовать базовую ветку: {baseBranch}",
 	"createTask.branchChoiceCurrent": "Использовать текущую ветку: {currentBranch}",
 	"createTask.reviewMode": "Это PR ревью",

@@ -15,6 +15,7 @@ import BranchSelector from "./BranchSelector";
 interface ProjectCurrentBranchInfo {
 	branch: string | null;
 	isBaseBranch: boolean;
+	isDirty: boolean;
 }
 
 interface CreateTaskModalProps {
@@ -483,6 +484,11 @@ function CreateTaskModal({ project, dispatch, onClose, onCreateAndRun }: CreateT
 								<p className="text-fg-3 text-sm">
 									{t("createTask.branchChoiceRisk")}
 								</p>
+								{projectCurrentBranch?.isDirty && (
+									<p className="text-danger text-sm">
+										{t("createTask.branchChoiceDirty")}
+									</p>
+								)}
 							</div>
 							<div className="flex flex-wrap justify-end gap-2">
 								<button

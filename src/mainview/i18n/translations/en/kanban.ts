@@ -37,6 +37,7 @@ const kanban = {
 	"createTask.branchChoiceTitle": "Start task from which branch?",
 	"createTask.branchChoiceBody": "The repo is currently on {currentBranch}, but this project's base branch is {baseBranch}.",
 	"createTask.branchChoiceRisk": "Starting from the current branch may carry over commits or changes from another task.",
+	"createTask.branchChoiceDirty": "Main repo has uncommitted changes.",
 	"createTask.branchChoiceBase": "Use base branch: {baseBranch}",
 	"createTask.branchChoiceCurrent": "Use current branch: {currentBranch}",
 	"createTask.reviewMode": "This is a PR review",

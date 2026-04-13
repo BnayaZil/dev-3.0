@@ -133,7 +133,7 @@ const tips = {
 	"tip.modalQuickDismiss.title": "Dismiss dialogs quickly",
 	"tip.modalQuickDismiss.body": "Press ESC or click the backdrop to close a dialog. If you have unsaved input, you'll get a confirmation prompt first.",
 	"tip.autoFillBranch.title": "Double-check branch start",
-	"tip.autoFillBranch.body": "When the current branch is auto-filled in the task picker, Save asks you to confirm before starting from it.",
+	"tip.autoFillBranch.body": "When the current branch is auto-filled in the task picker, Save warns before starting from it and also flags a dirty main repo.",
 	"tip.taskOpenMode.title": "Full-screen terminal mode",
 	"tip.taskOpenMode.body": "Switch Task Open Mode to \"Full screen\" in Global Settings to open tasks in a distraction-free terminal instead of split view.",
 	"tip.forkBranchSupport.title": "Review fork PRs",
