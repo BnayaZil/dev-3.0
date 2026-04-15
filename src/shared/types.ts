@@ -1205,7 +1205,7 @@ export type AppRPCSchema = {
 			};
 			getProjectCurrentBranch: {
 				params: { projectId: string };
-				response: { branch: string | null; isBaseBranch: boolean };
+				response: { branch: string | null; isBaseBranch: boolean; isDirty: boolean };
 			};
 			getTipState: {
 				params: void;
