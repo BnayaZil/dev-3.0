@@ -54,6 +54,19 @@ const common = {
 	"ghWarning.dismiss": "Понятно",
 	"ghWarning.dontShowAgain": "Больше не показывать",
 
+	// Folder picker (custom modal — works in both desktop and remote/browser modes)
+	"folderPicker.title": "Выберите папку",
+	"folderPicker.home": "Домой",
+	"folderPicker.rootLabel": "Корень",
+	"folderPicker.loading": "Загрузка…",
+	"folderPicker.pathPlaceholder": "Вставьте путь, Enter",
+	"folderPicker.filterPlaceholder": "Фильтр папок…",
+	"folderPicker.sectionPlaces": "Места",
+	"folderPicker.sectionRecent": "Недавние",
+	"folderPicker.selected": "Выбрано",
+	"folderPicker.select": "Выбрать",
+	"folderPicker.cancel": "Отмена",
+
 	// Unsaved changes guard
 	"unsavedChanges.title": "Несохранённые изменения",
 	"unsavedChanges.message": "В настройках проекта есть несохранённые изменения. Что сделать?",
