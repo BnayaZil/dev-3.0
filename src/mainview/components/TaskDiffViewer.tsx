@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
-import type { Project, Task, TaskDiffFile, TaskDiffResponse } from "../../shared/types";
+import type { Project, Task, TaskDiffFile, TaskDiffFileStatus, TaskDiffResponse, TaskDiffSkippedFile } from "../../shared/types";
 import { api } from "../rpc";
 import { useT } from "../i18n";
 import { useResolvedTheme } from "../hooks/useResolvedTheme";
+import { formatBytes } from "../utils/formatBytes";
 import type { TaskInlineDiffRequest } from "./task-inline-diff";
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import "./TaskDiffViewer.css";
@@ -133,6 +134,7 @@ interface DiffTreeFileNode {
 	path: string;
 	fileId: string;
 	status: TaskDiffFile["status"];
+	skipped?: "binary" | "too-large";
 }
 
 function createEmptyInlineCommentFileData(): InlineDiffCommentFileData {
@@ -589,6 +591,11 @@ export function getDiffFileContentHash(file: TaskDiffFile): string {
 	return hashText(payload);
 }
 
+function getSkippedFileReadSignature(taskId: string, skipped: TaskDiffSkippedFile): string {
+	const payload = `${skipped.status}:${skipped.reason}:${skipped.oldSize ?? ""}:${skipped.newSize ?? ""}`;
+	return `${taskId}:${skipped.oldPath ?? ""}:${skipped.newPath ?? ""}:${hashText(payload)}`;
+}
+
 function readStoredReadState(): Record<string, boolean> {
 	try {
 		const raw = localStorage.getItem(LS_DIFF_READ_STATE);
@@ -628,7 +635,7 @@ function findDiffFileByPath(files: TaskDiffFile[], path: string | undefined): Ta
 	)) ?? null;
 }
 
-function statusClassName(status: TaskDiffFile["status"]): string {
+function statusClassName(status: TaskDiffFileStatus): string {
 	switch (status) {
 		case "added":
 		case "untracked":
@@ -643,7 +650,32 @@ function statusClassName(status: TaskDiffFile["status"]): string {
 	}
 }
 
-function statusLabel(status: TaskDiffFile["status"]): string {
+function formatSkippedSize(size: number | null): string {
+	return size === null ? "—" : formatBytes(size);
+}
+
+function statusLabelLong(status: TaskDiffFileStatus, t: (key: any, vars?: any) => string): string {
+	switch (status) {
+		case "added":
+			return t("infoPanel.diffStatusAdded");
+		case "modified":
+			return t("infoPanel.diffStatusModified");
+		case "deleted":
+			return t("infoPanel.diffStatusDeleted");
+		case "renamed":
+			return t("infoPanel.diffStatusRenamed");
+		case "copied":
+			return t("infoPanel.diffStatusCopied");
+		case "type-changed":
+			return t("infoPanel.diffStatusTypeChanged");
+		case "untracked":
+			return t("infoPanel.diffStatusUntracked");
+		default:
+			return status;
+	}
+}
+
+function statusLabel(status: TaskDiffFileStatus): string {
 	switch (status) {
 		case "added":
 			return "A";
@@ -691,7 +723,7 @@ function getFileDiffStats(file: TaskDiffFile): { insertions: number; deletions: 
 	};
 }
 
-function buildDiffTree(files: TaskDiffFile[]): DiffTreeNode[] {
+function buildDiffTree(files: TaskDiffFile[], skippedFiles: TaskDiffSkippedFile[]): DiffTreeNode[] {
 	const root: DiffTreeNode[] = [];
 
 	function findOrCreateFolder(children: DiffTreeNode[], name: string, path: string): DiffTreeFolderNode {
@@ -725,13 +757,11 @@ function buildDiffTree(files: TaskDiffFile[]): DiffTreeNode[] {
 		return nodes;
 	}
 
-	for (const file of files) {
-		const fullPath = file.newPath ?? file.oldPath ?? file.displayPath;
+	function insertFileNode(fullPath: string, node: DiffTreeFileNode): void {
 		const segments = fullPath.split("/").filter(Boolean);
 		if (segments.length === 0) {
-			continue;
+			return;
 		}
-
 		let currentChildren = root;
 		let currentPath = "";
 		for (let index = 0; index < segments.length - 1; index++) {
@@ -739,15 +769,31 @@ function buildDiffTree(files: TaskDiffFile[]): DiffTreeNode[] {
 			currentPath = currentPath ? `${currentPath}/${segment}` : segment;
 			currentChildren = findOrCreateFolder(currentChildren, segment, currentPath).children;
 		}
+		currentChildren.push({ ...node, name: segments[segments.length - 1] });
+	}
 
-		const fileName = segments[segments.length - 1];
-		currentChildren.push({
+	for (const file of files) {
+		const fullPath = file.newPath ?? file.oldPath ?? file.displayPath;
+		insertFileNode(fullPath, {
 			type: "file",
 			key: `file:${file.id}`,
-			name: fileName,
+			name: "",
 			path: fullPath,
 			fileId: file.id,
 			status: file.status,
+		});
+	}
+
+	for (const skipped of skippedFiles) {
+		const fullPath = skipped.newPath ?? skipped.oldPath ?? skipped.displayPath;
+		insertFileNode(fullPath, {
+			type: "file",
+			key: `file:${skipped.id}`,
+			name: "",
+			path: fullPath,
+			fileId: skipped.id,
+			status: skipped.status,
+			skipped: skipped.reason,
 		});
 	}
 
@@ -1065,7 +1111,7 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 	const resolvedTheme = useResolvedTheme();
 	const toolbarRef = useRef<HTMLDivElement | null>(null);
 	const scrollRegionRef = useRef<HTMLDivElement | null>(null);
-	const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 	const pendingScrollFrameRef = useRef<number | null>(null);
 	const pendingCommentScrollFrameRef = useRef<number | null>(null);
 	const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1084,7 +1130,7 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 	const [copiedReviewXml, setCopiedReviewXml] = useState(false);
 	const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
 	const [editingCommentDraft, setEditingCommentDraft] = useState("");
-	const fileTree = payload ? buildDiffTree(payload.files) : [];
+	const fileTree = payload ? buildDiffTree(payload.files, payload.skippedFiles) : [];
 	const reviewExportEntries = payload ? buildInlineReviewExportEntries(payload.files, inlineComments) : [];
 	const reviewExportXml = buildInlineReviewXml(reviewExportEntries);
 
@@ -1223,9 +1269,12 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 		}
 
 		const storedReadState = readStoredReadState();
-		const nextReadFiles = Object.fromEntries(
+		const nextReadFiles: Record<string, boolean> = Object.fromEntries(
 			payload.files.map((file) => [file.id, !!storedReadState[getFileReadSignature(task.id, file)]]),
 		);
+		for (const skipped of payload.skippedFiles) {
+			nextReadFiles[skipped.id] = !!storedReadState[getSkippedFileReadSignature(task.id, skipped)];
+		}
 		const nextExpandedFiles = Object.fromEntries(
 			payload.files.map((file) => [file.id, !nextReadFiles[file.id]]),
 		);
@@ -1559,10 +1608,13 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 			return;
 		}
 		const targetFile = payload.files.find((file) => file.id === fileId);
-		if (!targetFile) {
+		const targetSkipped = targetFile ? null : payload.skippedFiles.find((s) => s.id === fileId);
+		if (!targetFile && !targetSkipped) {
 			return;
 		}
-		const signature = getFileReadSignature(task.id, targetFile);
+		const signature = targetFile
+			? getFileReadSignature(task.id, targetFile)
+			: getSkippedFileReadSignature(task.id, targetSkipped!);
 		const nextRead = !(readFiles[fileId] ?? false);
 		const storedReadState = readStoredReadState();
 		if (nextRead) {
@@ -1575,6 +1627,9 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 			...current,
 			[fileId]: nextRead,
 		}));
+		if (targetSkipped) {
+			return;
+		}
 		if (nextRead) {
 			collapseFilePreservingStickyAnchor(fileId);
 			return;
@@ -1607,18 +1662,35 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 				delete storedReadState[signature];
 			}
 		}
+		for (const skipped of payload.skippedFiles) {
+			const signature = getSkippedFileReadSignature(task.id, skipped);
+			if (nextRead) {
+				storedReadState[signature] = true;
+			} else {
+				delete storedReadState[signature];
+			}
+		}
 		writeStoredReadState(storedReadState);
-		setReadFiles(
-			Object.fromEntries(payload.files.map((file) => [file.id, nextRead])),
+		const nextReadEntries: Record<string, boolean> = Object.fromEntries(
+			payload.files.map((file) => [file.id, nextRead]),
 		);
+		for (const skipped of payload.skippedFiles) {
+			nextReadEntries[skipped.id] = nextRead;
+		}
+		setReadFiles(nextReadEntries);
 		setExpandedFiles(
 			Object.fromEntries(payload.files.map((file) => [file.id, nextRead ? false : true])),
 		);
 	}
 
+	const totalFileCount = payload ? payload.files.length + payload.skippedFiles.length : 0;
 	const readCount = payload ? Object.values(readFiles).filter(Boolean).length : 0;
 	const allFilesExpanded = payload ? payload.files.every((file) => expandedFiles[file.id] ?? true) : false;
-	const allFilesRead = payload ? payload.files.length > 0 && payload.files.every((file) => readFiles[file.id] ?? false) : false;
+	const allFilesRead = payload
+		? totalFileCount > 0
+			&& payload.files.every((file) => readFiles[file.id] ?? false)
+			&& payload.skippedFiles.every((skipped) => readFiles[skipped.id] ?? false)
+		: false;
 
 	function renderFileTreeNode(node: DiffTreeNode, depth = 0): JSX.Element {
 		if (node.type === "folder") {
@@ -1652,6 +1724,7 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 
 		const isRead = readFiles[node.fileId] ?? false;
 		const isActive = activeFileId === node.fileId;
+		const isSkipped = node.skipped !== undefined;
 		return (
 			<button
 				key={node.key}
@@ -1667,9 +1740,21 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 				<span className={`inline-flex items-center justify-center min-w-[1.1rem] rounded border px-1 py-0.5 text-[0.6rem] font-bold ${statusClassName(node.status)}`}>
 					{statusLabel(node.status)}
 				</span>
-				<span className={`min-w-0 truncate font-mono ${isRead ? "text-fg-muted line-through decoration-1" : ""}`}>
+				<span className={`min-w-0 truncate font-mono ${isRead ? "text-fg-muted line-through decoration-1" : ""} ${isSkipped ? "italic" : ""}`}>
 					{node.name}
 				</span>
+				{isSkipped && (
+					<span
+						aria-hidden="true"
+						className="ml-auto shrink-0 text-[0.95rem] leading-none text-fg-muted"
+						style={{ fontFamily: "'JetBrainsMono Nerd Font Mono'" }}
+						title={node.skipped === "binary"
+							? t("infoPanel.diffSkippedReasonBinary")
+							: t("infoPanel.diffSkippedReasonLarge")}
+					>
+						{"\u{F0219}"}
+					</span>
+				)}
 			</button>
 		);
 	}
@@ -1748,10 +1833,10 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 								<span className="text-success">+{payload.summary.insertions}</span>
 								<span className="text-danger">−{payload.summary.deletions}</span>
 							</span>
-							{payload.files.length !== payload.summary.files && (
+							{totalFileCount !== payload.summary.files && (
 								<span className="px-2 py-1 rounded-md bg-raised text-fg-3 border border-edge text-[0.6875rem]">
 									{t("infoPanel.diffShownCount", {
-										shown: String(payload.files.length),
+										shown: String(totalFileCount),
 										total: String(payload.summary.files),
 									})}
 								</span>
@@ -1761,16 +1846,24 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 									{t("infoPanel.diffFallbackNoUpstream", { ref: payload.compareLabel })}
 								</span>
 							)}
-							{payload.skippedBinaryFiles.length > 0 && (
-								<span className="px-2 py-1 rounded-md bg-raised text-fg-3 border border-edge text-[0.6875rem]">
-									{t("infoPanel.diffBinarySkipped", { count: String(payload.skippedBinaryFiles.length) })}
-								</span>
-							)}
-							{payload.skippedLargeFiles.length > 0 && (
-								<span className="px-2 py-1 rounded-md bg-raised text-fg-3 border border-edge text-[0.6875rem]">
-									{t("infoPanel.diffLargeSkipped", { count: String(payload.skippedLargeFiles.length) })}
-								</span>
-							)}
+							{(() => {
+								const binaryCount = payload.skippedFiles.filter((f) => f.reason === "binary").length;
+								const largeCount = payload.skippedFiles.filter((f) => f.reason === "too-large").length;
+								return (
+									<>
+										{binaryCount > 0 && (
+											<span className="px-2 py-1 rounded-md bg-raised text-fg-3 border border-edge text-[0.6875rem]">
+												{t.plural("infoPanel.diffBinaryCount", binaryCount)}
+											</span>
+										)}
+										{largeCount > 0 && (
+											<span className="px-2 py-1 rounded-md bg-raised text-fg-3 border border-edge text-[0.6875rem]">
+												{t.plural("infoPanel.diffLargeCount", largeCount)}
+											</span>
+										)}
+									</>
+								);
+							})()}
 						</>
 					)}
 					{renderToolbarButton(t("infoPanel.diffBranch"), currentRequest.mode === "branch", () => switchDiffMode("branch"))}
@@ -1784,7 +1877,7 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 			</div>
 
 			<div className="flex-1 min-h-0 flex overflow-hidden">
-				{!error && !isBusy && payload && payload.files.length > 0 && (
+				{!error && !isBusy && payload && totalFileCount > 0 && (
 					<aside className="w-[22rem] shrink-0 border-r border-edge bg-raised/35">
 						<div className="h-full overflow-auto px-3 py-2">
 							<div className="sticky top-0 z-10 bg-raised/35 pb-2">
@@ -1885,7 +1978,7 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 											{t("infoPanel.diffFiles")}
 										</span>
 										<span className="text-[0.6875rem] text-fg-3 font-mono">
-											{readCount}/{payload.files.length} {t("infoPanel.diffRead")}
+											{readCount}/{totalFileCount} {t("infoPanel.diffRead")}
 										</span>
 									</div>
 									<div className="grid grid-cols-2 gap-2">
@@ -1926,14 +2019,9 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 					</div>
 				)}
 
-				{!error && !isBusy && payload && payload.files.length === 0 && payload.summary.files === 0 && renderState(
+				{!error && !isBusy && payload && payload.files.length === 0 && payload.skippedFiles.length === 0 && renderState(
 					t("infoPanel.diffNoChanges"),
 					t("infoPanel.diffNoChangesBody"),
-				)}
-
-				{!error && !isBusy && payload && payload.files.length === 0 && payload.summary.files > 0 && renderState(
-					t("infoPanel.diffNoRenderableFiles"),
-					t("infoPanel.diffNoRenderableFilesBody"),
 				)}
 
 				{!error && !isBusy && payload && diffLib && viewMode && payload.files.length > 0 && (
@@ -1966,6 +2054,92 @@ function TaskDiffViewer({ task, project, request, onBack }: TaskDiffViewerProps)
 								}}
 							/>
 						))}
+					</div>
+				)}
+
+				{!error && !isBusy && payload && payload.skippedFiles.length > 0 && (
+					<div className={payload.files.length > 0 ? "mt-5" : ""} data-testid="diff-skipped-files">
+						<div className="rounded-xl border border-edge bg-raised">
+							<div className="px-3 py-2 border-b border-edge flex items-center gap-2">
+								<span
+									aria-hidden="true"
+									className="text-[1rem] leading-none text-fg-3"
+									style={{ fontFamily: "'JetBrainsMono Nerd Font Mono'" }}
+								>
+									{"\u{F0219}"}
+								</span>
+								<span className="text-xs font-semibold text-fg">
+									{t("infoPanel.diffSkippedFilesTitle")}
+								</span>
+								<span className="text-[0.6875rem] text-fg-3 font-mono">
+									{payload.skippedFiles.length}
+								</span>
+							</div>
+							<ul className="divide-y divide-edge">
+								{payload.skippedFiles.map((skipped) => {
+									const isRead = readFiles[skipped.id] ?? false;
+									const isActive = activeFileId === skipped.id;
+									return (
+										<li
+											key={skipped.id}
+											ref={(element) => {
+												sectionRefs.current[skipped.id] = element;
+											}}
+											className={`px-3 py-2 flex items-center gap-2 text-[0.75rem] ${
+												isActive ? "bg-accent/10" : ""
+											}`}
+										>
+											<span
+												title={statusLabelLong(skipped.status, t)}
+												className={`px-1.5 py-0.5 rounded-md border text-[0.625rem] font-bold ${statusClassName(skipped.status)}`}
+											>
+												{statusLabel(skipped.status)}
+											</span>
+											<span
+												className={`min-w-0 flex-1 truncate font-mono text-fg-2 ${
+													isRead ? "text-fg-muted line-through decoration-1" : ""
+												}`}
+												title={skipped.displayPath}
+											>
+												{(skipped.status === "renamed" || skipped.status === "copied") && skipped.oldPath && skipped.newPath
+													? (
+														<>
+															<span className="text-fg-muted">{skipped.oldPath}</span>
+															<span className="mx-1.5 text-fg-3">{"→"}</span>
+															<span>{skipped.newPath}</span>
+														</>
+													)
+													: skipped.displayPath}
+											</span>
+											<span className="shrink-0 font-mono text-fg-3 text-[0.6875rem] tabular-nums">
+												{formatSkippedSize(skipped.oldSize)}
+												<span className="mx-1.5 text-fg-muted">{"→"}</span>
+												{formatSkippedSize(skipped.newSize)}
+											</span>
+											<span className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[0.625rem] ${
+												skipped.reason === "binary"
+													? "bg-accent/10 text-accent border-accent/25"
+													: "bg-warning/10 text-warning border-warning/25"
+											}`}>
+												{skipped.reason === "binary"
+													? t("infoPanel.diffSkippedReasonBinary")
+													: t("infoPanel.diffSkippedReasonLarge")}
+											</span>
+											<label className="shrink-0 inline-flex items-center gap-1.5 text-[0.625rem] text-fg-3 cursor-pointer select-none">
+												<input
+													type="checkbox"
+													checked={isRead}
+													onChange={() => toggleFileRead(skipped.id)}
+													aria-label={t("infoPanel.diffReadFile", { file: skipped.displayPath })}
+													className="h-3.5 w-3.5 cursor-pointer"
+												/>
+												<span>{t("infoPanel.diffRead")}</span>
+											</label>
+										</li>
+									);
+								})}
+							</ul>
+						</div>
 					</div>
 				)}
 			</div>
