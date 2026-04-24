@@ -63,6 +63,18 @@ const ALL_TIPS: Tip[] = [
 		bodyKey: "tip.taskOverviewHover.body",
 		icon: "\u{F02FC}", // nf-md-information_outline
 	},
+	{
+		id: "active-task-overview-inline",
+		titleKey: "tip.activeTaskOverviewInline.title",
+		bodyKey: "tip.activeTaskOverviewInline.body",
+		icon: "\u{F02FC}", // nf-md-information_outline
+	},
+	{
+		id: "user-overview-override",
+		titleKey: "tip.userOverviewOverride.title",
+		bodyKey: "tip.userOverviewOverride.body",
+		icon: "\u{F040}", // nf-md-pencil
+	},
 	// Batch 1: split-view, multi-variant, labels, search, PR
 	{
 		id: "split-view-escape",
