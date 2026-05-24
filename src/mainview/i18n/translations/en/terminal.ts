@@ -31,6 +31,8 @@ const terminal = {
 	"tmux.layoutMainHDesc": "Main + bottom",
 	"tmux.layoutMainVDesc": "Main + right",
 	"tmux.closePaneDesc": "Close pane",
+	"tmux.closePaneConfirmTitle": "Close the last pane?",
+	"tmux.closePaneConfirmMessage": "This is the only remaining pane — closing it will tear down the whole tmux session and terminate the agent. Are you sure?",
 	"tmux.selectPaneDesc": "Click on a pane to select it",
 	"tmux.resizePaneDesc": "Drag pane border to resize",
 	"tmux.keyboardMode": "Keyboard Mode",

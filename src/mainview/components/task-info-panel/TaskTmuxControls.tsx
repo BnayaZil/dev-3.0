@@ -114,8 +114,32 @@ export default function TaskTmuxControls({ taskId }: TaskTmuxControlsProps) {
 		setKeymapPreset(keymapPreset === "iterm2" ? "default" : "iterm2");
 	}
 
-	const handleTmuxAction = (action: TmuxAction) => (event: ReactMouseEvent<HTMLButtonElement>) => {
+	const handleTmuxAction = (action: TmuxAction) => async (event: ReactMouseEvent<HTMLButtonElement>) => {
 		event.stopPropagation();
+		if (action === "killPane") {
+			let count = 0;
+			try {
+				const result = await api.request.tmuxPaneCount({ taskId });
+				count = result.count;
+			} catch {
+				count = 0;
+			}
+			if (count <= 1) {
+				// Closing the last pane tears down the whole tmux session — confirm first.
+				let confirmed = false;
+				try {
+					confirmed = await api.request.showConfirm({
+						title: t("tmux.closePaneConfirmTitle"),
+						message: t("tmux.closePaneConfirmMessage"),
+					});
+				} catch {
+					confirmed = false;
+				}
+				if (!confirmed) return;
+				api.request.tmuxAction({ taskId, action, force: true }).catch(() => {});
+				return;
+			}
+		}
 		api.request.tmuxAction({ taskId, action }).catch(() => {});
 	};
 
