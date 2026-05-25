@@ -12,7 +12,7 @@ describe("ensureCodexConfig", () => {
 			expect(result).toContain('trust_level = "trusted"');
 			expect(result).toContain('default_permissions = "workspace"');
 			expect(result).toContain("[permissions.workspace.filesystem]");
-			expect(result).toContain('[permissions.workspace.filesystem.":project_roots"]');
+			expect(result).toContain('[permissions.workspace.filesystem.":workspace_roots"]');
 			expect(result).toContain("[permissions.workspace.network]");
 			// Permission profile
 			expect(result).toContain("[permissions.dev3.filesystem]");
@@ -20,7 +20,7 @@ describe("ensureCodexConfig", () => {
 			expect(result).toContain('"/Users/testuser/.codex/skills" = "read"');
 			expect(result).toContain('"/Users/testuser/.agents/skills" = "read"');
 			expect(result).toContain('"/Users/testuser/.dev3.0" = "write"');
-			expect(result).toContain('[permissions.dev3.filesystem.":project_roots"]');
+			expect(result).toContain('[permissions.dev3.filesystem.":workspace_roots"]');
 			expect(result).toContain('"." = "write"');
 			expect(result).toContain("[permissions.dev3.network]");
 			expect(result).toContain("enabled = true");
@@ -33,7 +33,8 @@ describe("ensureCodexConfig", () => {
 			expect(result).not.toContain('tui.theme = "github"');
 			expect(result).not.toContain('tui.theme = "dracula"');
 			expect(result).toContain("[features]");
-			expect(result).toContain("codex_hooks = true");
+			expect(result).toContain("hooks = true");
+			expect(result).not.toContain("codex_hooks");
 		});
 
 		it("creates a generic workspace profile and uses it as default_permissions when missing", () => {
@@ -41,7 +42,7 @@ describe("ensureCodexConfig", () => {
 			expect(result).toContain('default_permissions = "workspace"');
 			expect(result).toContain("[permissions.workspace.filesystem]");
 			expect(result).toContain('":minimal" = "read"');
-			expect(result).toContain('[permissions.workspace.filesystem.":project_roots"]');
+			expect(result).toContain('[permissions.workspace.filesystem.":workspace_roots"]');
 			expect(result).toContain('"." = "write"');
 			expect(result).toContain("[permissions.workspace.network]");
 			expect(result).toContain("enabled = true");
@@ -78,7 +79,7 @@ trust_level = "trusted"
 [permissions.dev3.filesystem]
 ":minimal" = "read"
 
-[permissions.dev3.filesystem.":project_roots"]
+[permissions.dev3.filesystem.":workspace_roots"]
 "." = "write"
 
 [permissions.dev3.network]
@@ -103,7 +104,7 @@ enabled = false
 			expect(result).toContain('default_permissions = "workspace"');
 			expect(result).toContain("[permissions.workspace.filesystem]");
 			expect(result).toContain('":minimal" = "read"');
-			expect(result).toContain('[permissions.workspace.filesystem.":project_roots"]');
+			expect(result).toContain('[permissions.workspace.filesystem.":workspace_roots"]');
 			expect(result).toContain('"." = "write"');
 			expect(result).toContain("[permissions.workspace.network]");
 			expect(result).toContain("enabled = true");
@@ -122,7 +123,7 @@ trust_level = "trusted"
 "~/.codex/skills" = "read"
 "~/.agents/skills" = "read"
 
-[permissions.dev3.filesystem.":project_roots"]
+[permissions.dev3.filesystem.":workspace_roots"]
 "." = "write"
 
 [permissions.dev3.network]
@@ -141,7 +142,7 @@ web_search = "live"
 # tui.theme = "dracula"
 
 [features]
-codex_hooks = true
+hooks = true
 `;
 			const result = ensureCodexConfig(existing, WORKTREES_PATH, SOCKETS_PATH);
 			const projectMatches = result.match(/\[projects\."[^"]*worktrees"\]/g);
@@ -180,7 +181,7 @@ tui.theme = "old-dark"
 	});
 
 	describe("when features section exists", () => {
-		it("adds codex_hooks without removing other feature flags", () => {
+		it("adds hooks without removing other feature flags", () => {
 			const existing = `[features]
 experimental_resume = true
 `;
@@ -188,17 +189,46 @@ experimental_resume = true
 
 			expect(result).toContain("[features]");
 			expect(result).toContain("experimental_resume = true");
-			expect(result).toContain("codex_hooks = true");
+			expect(result).toContain("hooks = true");
 		});
 
-		it("updates codex_hooks to true when it was false", () => {
+		it("updates hooks to true when it was false", () => {
 			const existing = `[features]
-codex_hooks = false
+hooks = false
 `;
 			const result = ensureCodexConfig(existing, WORKTREES_PATH, SOCKETS_PATH);
 
-			expect(result).toContain("codex_hooks = true");
-			expect(result).not.toContain("codex_hooks = false");
+			expect(result).toContain("hooks = true");
+			expect(result).not.toContain("hooks = false");
+		});
+
+		it("renames deprecated codex_hooks → hooks", () => {
+			const existing = `[features]
+codex_hooks = true
+`;
+			const result = ensureCodexConfig(existing, WORKTREES_PATH, SOCKETS_PATH);
+
+			expect(result).toContain("hooks = true");
+			expect(result).not.toContain("codex_hooks");
+		});
+	});
+
+	describe("legacy :project_roots migration", () => {
+		it("renames dev3 :project_roots → :workspace_roots", () => {
+			const existing = `[permissions.dev3.filesystem]
+":minimal" = "read"
+
+[permissions.dev3.filesystem.":project_roots"]
+"." = "write"
+
+[permissions.dev3.network]
+enabled = true
+allow_unix_sockets = ["${SOCKETS_PATH}"]
+`;
+			const result = ensureCodexConfig(existing, WORKTREES_PATH, SOCKETS_PATH);
+
+			expect(result).toContain('[permissions.dev3.filesystem.":workspace_roots"]');
+			expect(result).not.toContain(':project_roots');
 		});
 	});
 

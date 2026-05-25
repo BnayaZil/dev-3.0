@@ -97,7 +97,7 @@ export function ensureCodexConfig(
 			`"${userHome}/.agents/skills" = "read"`,
 			`"${dev3Home}" = "write"`,
 			"",
-			`[permissions.${DEV3_CODEX_PROFILE}.filesystem.":project_roots"]`,
+			`[permissions.${DEV3_CODEX_PROFILE}.filesystem.":workspace_roots"]`,
 			'"." = "write"',
 			"",
 			`[permissions.${DEV3_CODEX_PROFILE}.network]`,
@@ -157,7 +157,7 @@ export function ensureCodexConfig(
 	if (parsed.default_permissions == null) {
 		const workspacePerm = parsed.permissions?.[WORKSPACE_CODEX_PROFILE] as CodexPermissionsProfile | undefined;
 		const workspaceFsHeader = `[permissions.${WORKSPACE_CODEX_PROFILE}.filesystem]`;
-		const workspaceProjectRootsHeader = `[permissions.${WORKSPACE_CODEX_PROFILE}.filesystem.":project_roots"]`;
+		const workspaceProjectRootsHeader = `[permissions.${WORKSPACE_CODEX_PROFILE}.filesystem.":workspace_roots"]`;
 		const workspaceNetworkHeader = `[permissions.${WORKSPACE_CODEX_PROFILE}.network]`;
 
 		if (workspacePerm == null) {
@@ -215,14 +215,15 @@ export function ensureCodexConfig(
 		// wiring disabled until we map the new Codex theme schema.
 	});
 
-	// --- 5. Ensure [features] codex_hooks = true ---
-	const codexHooksEnabled = parsed.features?.codex_hooks === true;
-	if (!codexHooksEnabled) {
+	// --- 5. Ensure [features] hooks = true ---
+	// Codex 0.133+ renamed `codex_hooks` → `hooks` (the old name is a deprecated alias).
+	const hooksEnabled = parsed.features?.hooks === true;
+	if (!hooksEnabled) {
 		const featuresHeader = "[features]";
 		if (!config.includes(featuresHeader)) {
-			config = appendBlock(config, `\n${featuresHeader}\ncodex_hooks = true\n`);
+			config = appendBlock(config, `\n${featuresHeader}\nhooks = true\n`);
 		} else {
-			config = upsertSectionLine(config, featuresHeader, "codex_hooks", "true");
+			config = upsertSectionLine(config, featuresHeader, "hooks", "true");
 		}
 	}
 
@@ -239,7 +240,47 @@ function cleanupLegacySections(content: string): string {
 	if (content.includes(".dev3.0/sockets")) {
 		content = removeSectionByHeader(content, "[permissions.network]");
 	}
+
+	// Codex 0.133+ renamed `:project_roots` → `:workspace_roots` in filesystem
+	// permission paths. Rewrite the headers we manage (dev3 + workspace).
+	content = content.replaceAll(
+		`[permissions.${DEV3_CODEX_PROFILE}.filesystem.":project_roots"]`,
+		`[permissions.${DEV3_CODEX_PROFILE}.filesystem.":workspace_roots"]`,
+	);
+	content = content.replaceAll(
+		`[permissions.${WORKSPACE_CODEX_PROFILE}.filesystem.":project_roots"]`,
+		`[permissions.${WORKSPACE_CODEX_PROFILE}.filesystem.":workspace_roots"]`,
+	);
+
+	// Codex 0.133+ renamed `[features].codex_hooks` → `[features].hooks`
+	// (`codex_hooks` is still parsed as a deprecated alias but emits a warning).
+	content = renameFeaturesKey(content, "codex_hooks", "hooks");
+
 	return content;
+}
+
+/**
+ * Rename a key inside the [features] table, preserving its value. No-op if
+ * the section or key does not exist, or if the new key already exists.
+ */
+function renameFeaturesKey(content: string, oldKey: string, newKey: string): string {
+	const featuresHeader = "[features]";
+	const headerIdx = content.indexOf(featuresHeader);
+	if (headerIdx === -1) return content;
+
+	const sectionStart = headerIdx + featuresHeader.length;
+	const nextSection = content.indexOf("\n[", sectionStart);
+	const sectionEnd = nextSection === -1 ? content.length : nextSection;
+	const section = content.slice(sectionStart, sectionEnd);
+
+	const newKeyPattern = new RegExp(`^\\s*${newKey}\\s*=`, "m");
+	if (newKeyPattern.test(section)) return content;
+
+	const oldKeyPattern = new RegExp(`^(\\s*)${oldKey}(\\s*=)`, "m");
+	if (!oldKeyPattern.test(section)) return content;
+
+	const updatedSection = section.replace(oldKeyPattern, `$1${newKey}$2`);
+	return content.slice(0, sectionStart) + updatedSection + content.slice(sectionEnd);
 }
 
 function commentOutManagedProfileThemeLines(content: string): string {

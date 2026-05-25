@@ -1,0 +1,1 @@
+Updated the auto-managed `~/.codex/config.toml` patcher to match Codex 0.133 schema: `[permissions.*.filesystem.":project_roots"]` → `":workspace_roots"` and `[features].codex_hooks` → `[features].hooks`. Existing user configs are migrated on next app startup so the deprecation warnings stop appearing.
