@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { GlobalSettings, Project, Task } from "../../shared/types";
 import { getPreparingStageProgress } from "../../shared/types";
 
@@ -5317,6 +5317,121 @@ describe("handlers.spawnAgentInTask", () => {
 		await expect(
 			handlers.spawnAgentInTask({ taskId: "abcd1234-full-id", projectId: "proj-1", agentId: "builtin-claude", configId: null }),
 		).rejects.toThrow("Failed to spawn agent");
+	});
+});
+
+// ================================================================
+// handlers.spawnBugHuntersInTask
+// ================================================================
+
+describe("handlers.spawnBugHuntersInTask", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function makeSplitMock(paneIds: string[]) {
+		let i = 0;
+		const enc = new TextEncoder();
+		mockSpawn.mockImplementation((args: string[]) => {
+			const isSplit = args.includes("split-window");
+			if (isSplit) {
+				const pane = paneIds[i++] ?? `%99`;
+				return { stderr: enc.encode(""), stdout: enc.encode(pane), exited: Promise.resolve(0) };
+			}
+			return { stderr: enc.encode(""), stdout: enc.encode(""), exited: Promise.resolve(0) };
+		});
+	}
+
+	it("creates N panes: first horizontal 50% off the session, rest vertical off the previous right pane", async () => {
+		const project = makeProject();
+		const task = makeTask({ id: "abcd1234-full-id", worktreePath: "/tmp/wt" });
+		(data.getProject as any).mockResolvedValue(project);
+		(data.getTask as any).mockResolvedValue(task);
+		(agents.resolveCommandForAgent as any).mockResolvedValue({ command: "claude", extraEnv: {} });
+		makeSplitMock(["%10", "%11", "%12"]);
+
+		const result = await handlers.spawnBugHuntersInTask({ taskId: "abcd1234-full-id", projectId: "proj-1", agentId: "builtin-claude", configId: "claude-default", count: 3 });
+
+		expect(result).toEqual({ spawned: 3 });
+
+		const splitCalls = mockSpawn.mock.calls
+			.map((c) => c[0] as string[])
+			.filter((args) => args.includes("split-window"));
+		expect(splitCalls).toHaveLength(3);
+
+		// First split: -h -l 50% targeting the session
+		expect(splitCalls[0]).toEqual(expect.arrayContaining(["split-window", "-h", "-l", "50%", "-t", "dev3-abcd1234"]));
+		// Second split: -v -l 67% (so new pane = 67% of target, target shrinks to 33%)
+		expect(splitCalls[1]).toEqual(expect.arrayContaining(["split-window", "-v", "-l", "67%", "-t", "%10"]));
+		// Third split: -v -l 50% on the previous new pane (gives ~33/33/33 in right column)
+		expect(splitCalls[2]).toEqual(expect.arrayContaining(["split-window", "-v", "-l", "50%", "-t", "%11"]));
+
+		// We must NOT call select-layout — it operates on the whole window and would
+		// collapse the main left pane to 1/N of the window height.
+		const layoutCalls = mockSpawn.mock.calls.map((c) => c[0] as string[]).filter((args) => args.includes("select-layout"));
+		expect(layoutCalls).toHaveLength(0);
+
+		// After 5s the auto-paste of /dev3-bug-hunter happens. The prompt MUST
+		// lock the hunter to changes in this branch only — otherwise hunters
+		// would roam the whole codebase, which is not the intent in the local
+		// lightbox path. Prompt and Enter are sent as TWO separate send-keys
+		// calls (paste, then Enter after a delay) so Claude does not treat the
+		// trailing Enter as a newline inside a bracketed paste.
+		vi.advanceTimersByTime(5100);
+		const pasteCalls = mockSpawn.mock.calls
+			.map((c) => c[0] as string[])
+			.filter((args) => args.includes("send-keys") && !args.includes("Enter"));
+		expect(pasteCalls).toHaveLength(3);
+		for (const args of pasteCalls) {
+			const prompt = args[args.length - 1];
+			expect(prompt).toContain("/dev3-bug-hunter");
+			expect(prompt).toContain("Scope is locked to THIS branch only");
+			expect(prompt).toContain("git diff --name-only");
+			expect(prompt).toContain("dev3/task-test");
+			expect(prompt).toContain("main");
+		}
+
+		// Enter not pressed yet.
+		const enterCallsBeforeDelay = mockSpawn.mock.calls.map((c) => c[0] as string[]).filter((args) => args.includes("send-keys") && args.includes("Enter"));
+		expect(enterCallsBeforeDelay).toHaveLength(0);
+
+		// After another 800ms the Enter goes in as a discrete keypress.
+		vi.advanceTimersByTime(900);
+		const enterCalls = mockSpawn.mock.calls.map((c) => c[0] as string[]).filter((args) => args.includes("send-keys") && args.includes("Enter"));
+		expect(enterCalls).toHaveLength(3);
+		for (const args of enterCalls) {
+			expect(args[args.length - 1]).toBe("Enter");
+		}
+	});
+
+	it("clamps count to 1..6", async () => {
+		const project = makeProject();
+		const task = makeTask({ id: "abcd1234-full-id", worktreePath: "/tmp/wt" });
+		(data.getProject as any).mockResolvedValue(project);
+		(data.getTask as any).mockResolvedValue(task);
+		(agents.resolveCommandForProject as any).mockResolvedValue({ command: "claude", extraEnv: {} });
+		makeSplitMock(["%a", "%b", "%c", "%d", "%e", "%f", "%g"]);
+
+		const result = await handlers.spawnBugHuntersInTask({ taskId: "abcd1234-full-id", projectId: "proj-1", agentId: null, configId: null, count: 99 });
+
+		expect(result.spawned).toBe(6);
+		const splitCalls = mockSpawn.mock.calls.map((c) => c[0] as string[]).filter((args) => args.includes("split-window"));
+		expect(splitCalls).toHaveLength(6);
+	});
+
+	it("throws when task has no worktree", async () => {
+		const project = makeProject();
+		const task = makeTask({ worktreePath: null });
+		(data.getProject as any).mockResolvedValue(project);
+		(data.getTask as any).mockResolvedValue(task);
+
+		await expect(
+			handlers.spawnBugHuntersInTask({ taskId: "task-1", projectId: "proj-1", agentId: null, configId: null, count: 3 }),
+		).rejects.toThrow("no worktree");
 	});
 });
 

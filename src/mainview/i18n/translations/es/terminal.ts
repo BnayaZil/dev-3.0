@@ -100,6 +100,18 @@ const terminal = {
 	"tmux.spawnExtraAgent": "Agente extra",
 	"tmux.spawnExtraAgentDesc": "Lanzar otro agente en un nuevo panel",
 
+	// Bug Hunters lightbox
+	"bugHunters.buttonLabel": "Buscar bugs",
+	"bugHunters.buttonTooltip": "Lanzar un enjambre de cazadores de bugs de solo lectura en el panel derecho",
+	"bugHunters.title": "Lanzar cazadores de bugs",
+	"bugHunters.subtitle": "Agentes de solo lectura que cazan bugs en paralelo",
+	"bugHunters.countLabel": "Cuántos cazadores",
+	"bugHunters.explainer": "Cada cazador se abre en la mitad derecha de esta sesión y ejecuta /dev3-bug-hunter con una estrategia semilla. El alcance se limita a los archivos cambiados SOLO en esta rama — no exploran todo el repo. Solo lectura.",
+	"bugHunters.launch_one": "Lanzar {count} cazador",
+	"bugHunters.launch_other": "Lanzar {count} cazadores",
+	"bugHunters.launching": "Lanzando…",
+	"bugHunters.failed": "No se pudo lanzar cazadores: {error}",
+
 	// Ports
 	"ports.title": "Puertos",
 	"ports.empty": "Sin puertos abiertos",

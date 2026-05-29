@@ -1491,6 +1491,201 @@ async function spawnAgentInTask(params: { taskId: string; projectId: string; age
 	log.info("← spawnAgentInTask done", { taskId: params.taskId.slice(0, 8) });
 }
 
+const BUG_HUNTER_AUTOTYPE_DELAY_MS = 5000;
+const BUG_HUNTER_ENTER_DELAY_MS = 800;
+
+function buildBugHunterPrompt(task: Task, project: Project): string {
+	const base = task.baseBranch || project.defaultBaseBranch || "main";
+	const branch = task.branchName || "HEAD";
+	const compareRef = base.includes("/") ? base : `origin/${base}`;
+	return (
+		`/dev3-bug-hunter ` +
+		`Scope is locked to THIS branch only. ` +
+		`Run \`git diff --name-only ${compareRef}...HEAD\` (fallback \`git diff --name-only ${base}...HEAD\`) to get the file list, ` +
+		`then hunt for bugs ONLY in those changed files and the code paths they touch. ` +
+		`Do NOT inspect unrelated parts of the codebase. ` +
+		`Branch: ${branch}. Base: ${base}.`
+	);
+}
+
+async function spawnSingleBugHunterPane(opts: {
+	project: Project;
+	task: Task;
+	socket: string;
+	tmuxSession: string;
+	worktreePath: string;
+	agentId: string | null;
+	configId: string | null;
+	splitArgs: string[];
+}): Promise<string | null> {
+	const ctx: agents.TemplateContext = {
+		taskTitle: "",
+		taskDescription: "",
+		projectName: opts.project.name,
+		projectPath: opts.project.path,
+		worktreePath: opts.worktreePath,
+	};
+
+	const freshSessionId = crypto.randomUUID();
+	const cmdOptions: agents.CommandOptions = { sessionId: freshSessionId };
+
+	let tmuxCmd: string;
+	let extraEnv: Record<string, string>;
+	let resolvedBaseCmd = "";
+	if (opts.agentId) {
+		const resolved = await agents.resolveCommandForAgent(opts.agentId, opts.configId, ctx, cmdOptions);
+		tmuxCmd = resolved.command;
+		extraEnv = resolved.extraEnv;
+		resolvedBaseCmd = resolved.config?.baseCommandOverride || resolved.agent?.baseCommand || "";
+	} else {
+		const resolved = await agents.resolveCommandForProject(
+			opts.project,
+			opts.task.title,
+			opts.task.description,
+			opts.worktreePath,
+			undefined,
+			cmdOptions,
+		);
+		tmuxCmd = resolved.command;
+		extraEnv = resolved.extraEnv;
+		resolvedBaseCmd = resolved.config?.baseCommandOverride || resolved.agent?.baseCommand || "";
+	}
+
+	const env: Record<string, string> = buildAgentEnv(extraEnv, opts.task.id);
+	const existingPorts = portPool.getPortAssignments(opts.task.id);
+	if (existingPorts.length > 0) {
+		Object.assign(env, portPool.buildPortEnv(existingPorts));
+	}
+
+	const scriptPath = `/tmp/dev3-${opts.task.id}-bughunt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.sh`;
+	await Bun.write(scriptPath, buildCmdScript(tmuxCmd, env));
+
+	const proc = spawn(
+		pty.tmuxArgs(opts.socket, "split-window", ...opts.splitArgs, "-P", "-F", "#{pane_id}", "-c", opts.worktreePath, `bash "${scriptPath}"`),
+		{ stdout: "pipe", stderr: "pipe" },
+	);
+	const [stdout, stderr] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
+	const exitCode = await proc.exited;
+	if (exitCode !== 0) {
+		throw new Error(`Failed to split pane: ${stderr.trim() || "unknown error"}`);
+	}
+
+	const newPaneId = stdout.trim() || null;
+
+	const paneEntry = {
+		paneId: newPaneId,
+		agentCmd: resolvedBaseCmd,
+		sessionId: agents.supportsPreAssignedSessionId(resolvedBaseCmd) ? freshSessionId : null,
+		agentId: opts.agentId,
+		configId: opts.configId,
+	};
+	try {
+		const freshTask = await data.getTask(opts.project, opts.task.id);
+		const existingPanes = freshTask.sessionState?.panes ?? [];
+		await data.updateTask(opts.project, opts.task.id, {
+			sessionState: { panes: [...existingPanes, paneEntry] },
+		});
+	} catch (err) {
+		log.error("Failed to append bug hunter pane to sessionState (non-fatal)", { error: String(err) });
+	}
+
+	return newPaneId;
+}
+
+async function spawnBugHuntersInTask(params: { taskId: string; projectId: string; agentId: string | null; configId: string | null; count: number }): Promise<{ spawned: number }> {
+	log.info("→ spawnBugHuntersInTask", { taskId: params.taskId.slice(0, 8), count: params.count, agentId: params.agentId });
+
+	const requestedCount = Math.max(1, Math.min(6, Math.floor(params.count)));
+
+	const project = await data.getProject(params.projectId);
+	const task = await data.getTask(project, params.taskId);
+	if (!task.worktreePath) {
+		throw new Error("Task has no worktree — cannot spawn bug hunters");
+	}
+
+	const socket = pty.getSessionSocket(params.taskId);
+	const tmuxSession = `dev3-${params.taskId.slice(0, 8)}`;
+
+	const paneIds: string[] = [];
+
+	// First hunter: split the current session horizontally, taking the right 50%.
+	const firstPaneId = await spawnSingleBugHunterPane({
+		project,
+		task,
+		socket,
+		tmuxSession,
+		worktreePath: task.worktreePath,
+		agentId: params.agentId,
+		configId: params.configId,
+		splitArgs: ["-h", "-l", "50%", "-t", tmuxSession],
+	});
+	if (firstPaneId) paneIds.push(firstPaneId);
+
+	// Subsequent hunters: split the right column vertically. We compute -p per
+	// split so all panes in the right column end up equal-sized WITHOUT calling
+	// select-layout on the window (that command would also shrink the main left
+	// pane to 1/N of the window, which broke the layout in the first iteration).
+	// Formula: at split i (1-indexed, 1..N-1), the new pane should take
+	// (N-i)/(N-i+1) of the target's current size. For N=3 → 67, 50. For N=6 →
+	// 83, 80, 75, 67, 50.
+	for (let i = 1; i < requestedCount; i++) {
+		const target = paneIds[paneIds.length - 1] ?? firstPaneId;
+		if (!target) break;
+		const remaining = requestedCount - i;
+		const percent = Math.round((remaining / (remaining + 1)) * 100);
+		try {
+			const paneId = await spawnSingleBugHunterPane({
+				project,
+				task,
+				socket,
+				tmuxSession,
+				worktreePath: task.worktreePath,
+				agentId: params.agentId,
+				configId: params.configId,
+				splitArgs: ["-v", "-l", `${percent}%`, "-t", target],
+			});
+			if (paneId) paneIds.push(paneId);
+		} catch (err) {
+			log.warn("Bug hunter split failed (continuing with remaining)", { index: i, error: String(err) });
+		}
+	}
+
+	// After the agents have had time to boot, paste the branch-scoped bug-hunter
+	// slash command into each pane. The scope clause is mandatory: hunters must
+	// only inspect files changed in this branch, never the whole codebase.
+	//
+	// Prompt paste and Enter are sent as TWO separate send-keys calls with a
+	// delay — Claude Code's input layer can treat a fast send-keys "prompt Enter"
+	// sequence as a single bracketed paste (where the trailing Enter becomes a
+	// newline inside the paste, not a submit). Splitting them guarantees Enter
+	// arrives as a discrete keypress after the paste buffer has been processed.
+	const prompt = buildBugHunterPrompt(task, project);
+	for (const paneId of paneIds) {
+		setTimeout(() => {
+			try {
+				const pasteProc = spawn(pty.tmuxArgs(socket, "send-keys", "-t", paneId, prompt), { stdout: "pipe", stderr: "pipe" });
+				pasteProc.exited.catch(() => {});
+			} catch (err) {
+				log.warn("send-keys paste for bug hunter pane failed", { paneId, error: String(err) });
+			}
+			setTimeout(() => {
+				try {
+					const enterProc = spawn(pty.tmuxArgs(socket, "send-keys", "-t", paneId, "Enter"), { stdout: "pipe", stderr: "pipe" });
+					enterProc.exited.catch(() => {});
+				} catch (err) {
+					log.warn("send-keys Enter for bug hunter pane failed", { paneId, error: String(err) });
+				}
+			}, BUG_HUNTER_ENTER_DELAY_MS);
+		}, BUG_HUNTER_AUTOTYPE_DELAY_MS);
+	}
+
+	log.info("← spawnBugHuntersInTask done", { taskId: params.taskId.slice(0, 8), spawned: paneIds.length });
+	return { spawned: paneIds.length };
+}
+
 /**
  * Called when a tmux pane exits. Reconciles sessionState against live panes
  * rather than matching by exact paneId — this handles setup panes, unmanaged
@@ -1565,6 +1760,7 @@ export const tmuxPtyHandlers = {
 	tmuxPaneCount,
 	exitCopyModeAllPanes,
 	spawnAgentInTask,
+	spawnBugHuntersInTask,
 	resumeTask,
 	restartTask,
 };
