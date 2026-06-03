@@ -2,6 +2,7 @@ import type { PortInfo } from "../shared/types";
 import { spawnSync } from "./spawn";
 import { tmuxArgs } from "./pty-server";
 import { createLogger } from "./logger";
+import { cleanupTaskTunnels } from "./port-tunnels";
 
 const log = createLogger("port-scanner");
 const decoder = new TextDecoder();
@@ -285,11 +286,14 @@ function poll() {
 		const sessions = getActiveSessionsFn();
 		const activeTaskIds = new Set(sessions.map((s) => s.taskId));
 
-		// Clean up stale cache entries
+		// Clean up stale cache entries. Same hook tears down any port-tunnels
+		// the gone task left behind — no need to wait for the liveness timer
+		// when the whole tmux session is already dead.
 		for (const taskId of portCache.keys()) {
 			if (!activeTaskIds.has(taskId)) {
 				portCache.delete(taskId);
 				portData.delete(taskId);
+				cleanupTaskTunnels(taskId);
 			}
 		}
 
@@ -308,6 +312,11 @@ function poll() {
 					portData.set(taskId, ports);
 					pushMessageFn!("portsUpdated", { taskId, ports });
 				}
+				// (Port-tunnel liveness used to be driven here, but tunnels now
+				// operate on the project's allocated `$DEV3_PORT0..N` slots —
+				// not on detected listening ports — so user explicitly starts
+				// and stops them. Autodetect was generating false positives for
+				// the app's own infrastructure ports.)
 			} catch (err) {
 				log.warn("Port scan failed for task", { taskId: taskId.slice(0, 8), error: String(err) });
 			}
