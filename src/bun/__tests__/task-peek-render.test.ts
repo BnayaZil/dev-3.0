@@ -5,11 +5,13 @@
 import { describe, it, expect } from "vitest";
 import {
 	clampPeekLines,
+	dropFaintText,
 	formatAge,
 	PEEK_DEFAULT_LINES,
 	PEEK_MAX_LINES,
 	renderTaskPeek,
 	selectPeekPane,
+	stripTerminalEscapes,
 	tailLines,
 	type PeekPane,
 	type TaskPeekSnapshot,
@@ -176,6 +178,36 @@ describe("tailLines", () => {
 
 	it("keeps tabs, which carry layout", () => {
 		expect(tailLines("a\tb", 10)).toBe("a\tb");
+	});
+});
+
+describe("dropFaintText", () => {
+	it("drops a dimmed ghost autosuggestion but keeps the real prompt", () => {
+		// Claude Code's empty input box: a live prompt, then a faint ghost of a past message.
+		const box = "\u001b[39m❯ \u001b[2mpush it and open the PR\u001b[0m";
+		expect(stripTerminalEscapes(dropFaintText(box))).toBe("❯ ");
+	});
+
+	it("leaves normal-intensity text untouched", () => {
+		expect(dropFaintText("plain \u001b[32mgreen\u001b[0m text")).toBe("plain \u001b[32mgreen\u001b[0m text");
+	});
+
+	it("resumes keeping text after faint is turned off (0 and 22)", () => {
+		expect(stripTerminalEscapes(dropFaintText("\u001b[2mghost\u001b[0mreal"))).toBe("real");
+		expect(stripTerminalEscapes(dropFaintText("\u001b[2mghost\u001b[22mreal"))).toBe("real");
+	});
+
+	it("does not mistake a truecolour introducer (38;2;r;g;b) for faint", () => {
+		// The `2` here selects RGB colour space, not the faint attribute.
+		expect(stripTerminalEscapes(dropFaintText("\u001b[38;2;255;0;0mred\u001b[0m"))).toBe("red");
+	});
+
+	it("keeps newlines even inside a faint run, so layout survives", () => {
+		expect(stripTerminalEscapes(dropFaintText("\u001b[2ma\nb\u001b[0mc"))).toBe("\nc");
+	});
+
+	it("is a no-op on plain text with no colour (native capture, logs)", () => {
+		expect(dropFaintText("no escapes here")).toBe("no escapes here");
 	});
 });
 

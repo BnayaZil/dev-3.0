@@ -308,6 +308,21 @@ describe.each<Backend>(["tmux", "native"])("dev3 peek on %s", (backend) => {
 		expect(snap.tail?.text).toBe("red\nplain");
 	});
 
+	it("drops a dimmed ghost autosuggestion so it does not read as unsent input", async () => {
+		// An empty input box showing a faint (SGR 2) ghost of a past message — the
+		// exact shape that made a coordinator report "typed but not sent, press Enter".
+		const ghosted = { ...TWO_PANES[0], text: "running tests\n\u001b[39m❯ \u001b[2mpush it and open the PR\u001b[0m" };
+		arrange(backend, [ghosted]);
+
+		const snap = await taskPeek({ task: task() });
+
+		expect(snap.tail?.text).toBe("running tests\n❯ ");
+		// The tmux path must capture WITH colour, or the faint marker never arrives.
+		if (backend === "tmux") {
+			expect(mocks.capturePane).toHaveBeenCalledWith(expect.objectContaining({ escapes: true }));
+		}
+	});
+
 	it("says freshness is unknown rather than guessing a time", async () => {
 		arrange(backend, [{ ...TWO_PANES[0], lastOutput: null }]);
 

@@ -124,6 +124,72 @@ export function stripTerminalEscapes(text: string): string {
 }
 
 /**
+ * Track the faint/dim (SGR 2) intensity across one `\u001b[…m` sequence. Faint is
+ * turned on by parameter 2 and off by 0 (reset all), an empty parameter list (also
+ * reset all), or 22 (normal intensity). Extended-colour introducers `38;5;n`,
+ * `38;2;r;g;b` (and the `48`/`58` variants) carry sub-parameters that must be
+ * skipped, or a truecolour value like `38;2;…` would be misread as "faint on".
+ */
+function sgrFaintState(params: string, prev: boolean): boolean {
+	if (params === "") return false;
+	const tokens = params.split(";").map((t) => (t === "" ? 0 : Number(t)));
+	let faint = prev;
+	for (let i = 0; i < tokens.length; i++) {
+		const n = tokens[i];
+		if (n === 38 || n === 48 || n === 58) {
+			const mode = tokens[i + 1];
+			i += mode === 2 ? 4 : mode === 5 ? 2 : 1;
+			continue;
+		}
+		if (n === 2) faint = true;
+		else if (n === 0 || n === 22) faint = false;
+	}
+	return faint;
+}
+
+/**
+ * Remove text an agent's TUI renders faint — chiefly Claude Code's dimmed ghost
+ * autosuggestion, the previous input echoed back into an EMPTY box. Peek used to
+ * capture without colour, so that ghost reached a coordinator as plain
+ * `❯ push it and open the PR` and read as a real unsent message; the coordinator
+ * then reported "typed but not sent, press Enter" for a message that had already
+ * landed. Peek now captures with colour and runs this first, so the ghost is
+ * dropped before {@link stripTerminalEscapes} discards the colour it rode in on.
+ *
+ * Newlines and tabs always survive, so only faint glyphs vanish and the layout is
+ * untouched. On text with no colour (the native backend's plain-text capture, or
+ * `dev3 pane logs`) it is a no-op. To switch to labelling the ghost instead of
+ * dropping it (kept an easy flip on purpose), replace the `if (faint) continue`
+ * below with an accumulate-and-wrap.
+ */
+export function dropFaintText(text: string): string {
+	let out = "";
+	let faint = false;
+	let i = 0;
+	while (i < text.length) {
+		const ch = text[i];
+		if (ch === "\u001b" && text[i + 1] === "[") {
+			const sgr = /^\u001b\[([0-9;]*)m/.exec(text.slice(i));
+			if (sgr) {
+				faint = sgrFaintState(sgr[1], faint);
+				out += sgr[0];
+				i += sgr[0].length;
+				continue;
+			}
+			const csi = /^\u001b\[[0-9;?]*[ -/]*[@-~]/.exec(text.slice(i));
+			if (csi) {
+				out += csi[0];
+				i += csi[0].length;
+				continue;
+			}
+		}
+		if (ch === "\n" || ch === "\t" || !faint) out += ch;
+		i++;
+	}
+	return out;
+}
+
+/**
  * Last `limit` lines plus how many there were, with trailing blank lines dropped
  * so the tail ends on content. The one implementation both surfaces read through:
  * `dev3 peek` wants the text, `dev3 pane logs` also wants the count.

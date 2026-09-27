@@ -22,6 +22,7 @@ import type { Task, TaskStatus } from "../shared/types";
 import {
 	captureMissDetail,
 	clampPeekLines,
+	dropFaintText,
 	selectPeekPane,
 	tailLines,
 	type PeekBackend,
@@ -173,12 +174,16 @@ async function tmuxPeek(task: Task, params: TaskPeekParams, observedAt: string):
 	const chosen = selectPeekPane(panes, params.pane);
 	if (!chosen) return liveSnapshot(task, "tmux", observedAt, panes, null, paneNotFound(params.pane));
 
+	// Capture WITH colour (`escapes`) so a dimmed ghost autosuggestion can be told
+	// apart from real unsent input; `dropFaintText` removes it before the tail is
+	// stripped to plain text. See `dropFaintText` in `shared/task-peek`.
 	const captured = await tmux.capturePane({
 		target: chosen.paneId,
 		startLine: CAPTURE_SCROLLBACK_START_LINE,
+		escapes: true,
 		socket,
 	});
-	return liveSnapshot(task, "tmux", observedAt, panes, tailOf(chosen, tailLines(captured, lines)));
+	return liveSnapshot(task, "tmux", observedAt, panes, tailOf(chosen, tailLines(dropFaintText(captured), lines)));
 }
 
 /**
@@ -229,7 +234,10 @@ async function nativePeek(task: Task, params: TaskPeekParams, observedAt: string
 	}
 	pane.alive = capture.liveness === "dead" ? false : pane.alive;
 
-	const text = tailLines([...capture.content.history, ...capture.content.viewport].join("\n"), lines);
+	// A no-op today — the native backend's capture is already a plain-text
+	// projection with no colour — but kept symmetric with the tmux path so a
+	// future colour-carrying native capture drops the same ghost.
+	const text = tailLines(dropFaintText([...capture.content.history, ...capture.content.viewport].join("\n")), lines);
 	return liveSnapshot(task, "native", observedAt, panes, tailOf(chosen, text));
 }
 
