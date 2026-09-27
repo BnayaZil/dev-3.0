@@ -1,9 +1,22 @@
 import type { PaneSessionEntry, Task } from "../shared/types";
-import { type PaneInputOutcome, type PaneInputStage, utf8Length } from "../shared/pane-input";
+import {
+	type PaneIncarnation,
+	type PaneInputOutcome,
+	type PaneInputStage,
+	isPaneInputRetryableAsNewDelivery,
+	samePaneIncarnation,
+	utf8Length,
+} from "../shared/pane-input";
 import { type AgentPromptDelivery, agentPromptHeld } from "../shared/agent-prompt-delivery";
 import type { AgentPromptEpilogue } from "./agent-prompt-delivery";
-import { sendPaneInput } from "./pane-input";
-import { agentMessageHoldKey, holdAgentMessage } from "./agent-message-hold";
+import { deliverPaneInput, newPaneInputDeliveryId, pinTaskPane, sendPaneInput } from "./pane-input";
+import {
+	agentMessageHoldKey,
+	hasStrandedAgentMessage,
+	holdAgentMessage,
+	type HeldAgentMessageReport,
+	type HeldDeliveryResult,
+} from "./agent-message-hold";
 import { AGENT_MESSAGE_BURST_SEPARATOR } from "../shared/agent-message-envelope";
 import { DEFAULT_TMUX_SOCKET, tmux, taskSessionName, PANE_ID_FORMAT, TMUX_AGENT_PANE_OPTION, TMUX_LAST_AGENT_PANE_OPTION } from "./tmux";
 import { createLogger } from "./logger";
@@ -200,6 +213,80 @@ function agentPromptSubmitStages(): PaneInputStage[] {
 	return [{ delayBeforeMs: AGENT_PROMPT_ENTER_DELAY_MS, steps: [{ kind: "key", key: "enter" }] }];
 }
 
+/** A scrolled-up pane refused the keys but is still the same pane: the hold waits for it. */
+function heldDeliveryResult(outcome: PaneInputOutcome): HeldDeliveryResult {
+	if (outcome.status === "delivered") return "landed";
+	return outcome.status === "not-started" && outcome.reason === "pane-in-mode" ? "deferred" : "failed";
+}
+
+/**
+ * The exact pane generation each held text last landed in. A stranded box belongs to
+ * that generation only: after a tmux restart the same `%id` names a different, empty box.
+ */
+const landedIncarnations = new Map<string, PaneIncarnation>();
+
+/** A held text, typed against a pin this adapter keeps, so the generation it reached is known. */
+async function typeHeldText(task: Task, paneId: string, holdKey: string, text: string): Promise<PaneInputOutcome> {
+	const pin = await pinTaskPane(task, paneId);
+	if (!pin.ok) {
+		return {
+			deliveryId: "",
+			backend: "tmux",
+			paneId,
+			status: "not-started",
+			reason: pin.reason,
+			retryableAsNewDelivery: isPaneInputRetryableAsNewDelivery(pin.reason),
+			detail: pin.detail,
+		};
+	}
+	const outcome = await deliverPaneInput(task, {
+		deliveryId: newPaneInputDeliveryId("agent-prompt"),
+		attempt: 1,
+		incarnation: pin.incarnation,
+		stages: agentMessageTextStages(text),
+	});
+	if (outcome.status === "delivered") landedIncarnations.set(holdKey, pin.incarnation);
+	return outcome;
+}
+
+/** Gone means absent, dead, or another generation; "cannot tell right now" keeps the messages. */
+async function paneStillThere(task: Task, paneId: string, holdKey: string): Promise<boolean> {
+	const pin = await pinTaskPane(task, paneId);
+	if (!pin.ok) return pin.reason === "backend-failure";
+	const landed = landedIncarnations.get(holdKey);
+	return !landed || samePaneIncarnation(landed, pin.incarnation);
+}
+
+/** The refusal a direct prompt gets while the pane's box holds a stranded peer message. */
+function inputOccupied(paneId: string): PaneInputOutcome {
+	return {
+		deliveryId: "",
+		backend: "tmux",
+		paneId,
+		status: "not-started",
+		reason: "input-occupied",
+		retryableAsNewDelivery: true,
+		detail: "a peer message is waiting unsent in the agent's input box — press Enter there first",
+	};
+}
+
+/**
+ * The receiving task's attention badge, because the sender was already told `held` and
+ * nothing reaches it later. Loaded lazily: the push channel is app-side UI plumbing.
+ */
+async function reportHeldMessage(task: Task, event: HeldAgentMessageReport): Promise<void> {
+	const reason =
+		event.kind === "stranded"
+			? `A peer message is typed in the agent's input box but not sent. Press Enter there to send it${event.waiting > 0 ? `; ${event.waiting} more wait until you do` : ""}.`
+			: `${event.messages} held peer message(s) were not delivered: ${event.why}.`;
+	try {
+		const { pushCliAttention } = await import("./rpc-handlers/shared");
+		pushCliAttention({ taskId: task.id, projectId: task.projectId, reason });
+	} catch (err) {
+		log.warn("could not raise the held-message badge", { taskId: task.id.slice(0, 8), error: String(err) });
+	}
+}
+
 /**
  * Hold a whole `dev3 message` for `paneId`: nothing is typed now, so nothing can land
  * in the middle of the line the user is writing.
@@ -216,15 +303,18 @@ function holdAgentMessageForPane(
 	epilogue?: AgentPromptEpilogue,
 ): AgentPromptDelivery {
 	const context = { taskId: task.id.slice(0, 8), paneId };
+	const holdKey = agentMessageHoldKey("tmux", task.id, paneId);
 	const delayMs = holdAgentMessage(
-		agentMessageHoldKey("tmux", task.id, paneId),
+		holdKey,
 		{
+			text: prompt,
+			alive: () => paneStillThere(task, paneId, holdKey),
+			report: (event) => void reportHeldMessage(task, event),
 			deliver: async (separator) => {
-				const text = await sendPaneInput(task, paneId, agentMessageTextStages(`${separator}${prompt}`), { idPrefix: "agent-prompt" });
-				if (text.status !== "delivered") {
-					log.warn("held agent message text did not land", { ...context, status: text.status });
-				}
-				return text.status === "delivered";
+				const text = await typeHeldText(task, paneId, holdKey, `${separator}${prompt}`);
+				const result = heldDeliveryResult(text);
+				if (result === "failed") log.warn("held agent message text did not land", { ...context, status: text.status });
+				return result;
 			},
 			bytes: utf8Length(prompt),
 			...(epilogue
@@ -254,9 +344,9 @@ function holdAgentMessageForPane(
 				: {}),
 			submit: async () => {
 				const submit = await sendPaneInput(task, paneId, agentPromptSubmitStages(), { idPrefix: "agent-submit" });
-				if (submit.status !== "delivered") {
-					log.warn("held agent message submit did not land", { ...context, status: submit.status });
-				}
+				const result = heldDeliveryResult(submit);
+				if (result === "failed") log.warn("held agent message submit did not land", { ...context, status: submit.status });
+				return result;
 			},
 		},
 		context,
@@ -304,6 +394,7 @@ export async function sendPromptToAgentPane(
 	const { tmuxSession, socket } = tmuxRouting(task);
 	const targetPane = await resolveAgentPromptTargetPane(tmuxSession, socket, agentPanes);
 	if (!targetPane) return noTargetPane(`no agent pane could be resolved in ${tmuxSession}`);
+	if (hasStrandedAgentMessage(agentMessageHoldKey("tmux", task.id, targetPane))) return inputOccupied(targetPane);
 	return sendPaneInput(task, targetPane, agentPromptStages(prompt), { idPrefix: "agent-prompt" });
 }
 
@@ -356,5 +447,6 @@ export async function holdMessageForPane(
  * misfires into whatever pane inherited the id.
  */
 export async function sendPromptToPane(task: Task, paneId: string, prompt: string): Promise<PaneInputOutcome> {
+	if (hasStrandedAgentMessage(agentMessageHoldKey("tmux", task.id, paneId))) return inputOccupied(paneId);
 	return sendPaneInput(task, paneId, agentPromptStages(prompt), { idPrefix: "agent-prompt" });
 }
