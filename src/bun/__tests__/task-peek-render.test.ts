@@ -182,28 +182,49 @@ describe("tailLines", () => {
 });
 
 describe("dropFaintText", () => {
-	it("drops a dimmed ghost autosuggestion but keeps the real prompt", () => {
-		// Claude Code's empty input box: a live prompt, then a faint ghost of a past message.
+	it("drops Claude Code's ghost autosuggestion but keeps the prompt glyph", () => {
+		// Empty input box: a live prompt, then a faint ghost of a past message.
 		const box = "\u001b[39m❯ \u001b[2mpush it and open the PR\u001b[0m";
 		expect(stripTerminalEscapes(dropFaintText(box))).toBe("❯ ");
+	});
+
+	it("drops Codex's faint placeholder after its `›` prompt glyph", () => {
+		const box = "\u001b[2m› Ask Codex to do anything\u001b[0m";
+		// The glyph survives even though the whole line is faint; the placeholder goes.
+		expect(stripTerminalEscapes(dropFaintText(box))).toBe("›");
+	});
+
+	it("keeps a real message the user typed at the prompt (not faint)", () => {
+		expect(stripTerminalEscapes(dropFaintText("❯ do the thing"))).toBe("❯ do the thing");
+	});
+
+	// The blocker Arseny caught: faint is real content off the prompt line.
+	it("keeps faint tool output that is NOT on the prompt line (Codex DIM)", () => {
+		const out = "│ \u001b[2mran build, 0 errors\u001b[0m\n└ \u001b[2mdone\u001b[0m";
+		expect(stripTerminalEscapes(dropFaintText(out))).toBe("│ ran build, 0 errors\n└ done");
+	});
+
+	it("keeps Codex's faint `Worked for … · HH:MM` line — how a coordinator sees a turn end", () => {
+		const line = "\u001b[2mWorked for 2m 41s · 10:50\u001b[0m";
+		expect(stripTerminalEscapes(dropFaintText(line))).toBe("Worked for 2m 41s · 10:50");
+	});
+
+	it("keeps a faint line-number gutter from a Claude file read", () => {
+		expect(stripTerminalEscapes(dropFaintText("\u001b[2m  1\u001b[0m const x = 1"))).toBe("  1 const x = 1");
 	});
 
 	it("leaves normal-intensity text untouched", () => {
 		expect(dropFaintText("plain \u001b[32mgreen\u001b[0m text")).toBe("plain \u001b[32mgreen\u001b[0m text");
 	});
 
-	it("resumes keeping text after faint is turned off (0 and 22)", () => {
-		expect(stripTerminalEscapes(dropFaintText("\u001b[2mghost\u001b[0mreal"))).toBe("real");
-		expect(stripTerminalEscapes(dropFaintText("\u001b[2mghost\u001b[22mreal"))).toBe("real");
+	it("does not mistake a truecolour introducer (38;2;r;g;b) for faint on the prompt line", () => {
+		// The `2` selects RGB colour space, not the faint attribute, so `red` stays.
+		expect(stripTerminalEscapes(dropFaintText("❯ \u001b[38;2;255;0;0mred\u001b[0m"))).toBe("❯ red");
 	});
 
-	it("does not mistake a truecolour introducer (38;2;r;g;b) for faint", () => {
-		// The `2` here selects RGB colour space, not the faint attribute.
-		expect(stripTerminalEscapes(dropFaintText("\u001b[38;2;255;0;0mred\u001b[0m"))).toBe("red");
-	});
-
-	it("keeps newlines even inside a faint run, so layout survives", () => {
-		expect(stripTerminalEscapes(dropFaintText("\u001b[2ma\nb\u001b[0mc"))).toBe("\nc");
+	it("keeps every row's newline so layout survives", () => {
+		const text = "running tests\n\u001b[39m❯ \u001b[2mghost\u001b[0m\nall good";
+		expect(stripTerminalEscapes(dropFaintText(text))).toBe("running tests\n❯ \nall good");
 	});
 
 	it("is a no-op on plain text with no colour (native capture, logs)", () => {
