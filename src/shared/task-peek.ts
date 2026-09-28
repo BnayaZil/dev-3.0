@@ -124,6 +124,100 @@ export function stripTerminalEscapes(text: string): string {
 }
 
 /**
+ * Track the faint/dim (SGR 2) intensity across one `\u001b[…m` sequence. Faint is
+ * turned on by parameter 2 and off by 0 (reset all), an empty parameter list (also
+ * reset all), or 22 (normal intensity). Extended-colour introducers `38;5;n`,
+ * `38;2;r;g;b` (and the `48`/`58` variants) carry sub-parameters that must be
+ * skipped, or a truecolour value like `38;2;…` would be misread as "faint on".
+ */
+function sgrFaintState(params: string, prev: boolean): boolean {
+	if (params === "") return false;
+	const tokens = params.split(";").map((t) => (t === "" ? 0 : Number(t)));
+	let faint = prev;
+	for (let i = 0; i < tokens.length; i++) {
+		const n = tokens[i];
+		if (n === 38 || n === 48 || n === 58) {
+			const mode = tokens[i + 1];
+			i += mode === 2 ? 4 : mode === 5 ? 2 : 1;
+			continue;
+		}
+		if (n === 2) faint = true;
+		else if (n === 0 || n === 22) faint = false;
+	}
+	return faint;
+}
+
+/** Prompt glyphs that begin an agent's input line — Claude Code's `❯`, Codex's `›`. */
+const PROMPT_GLYPHS = new Set(["❯", "›"]);
+
+/**
+ * Is this row the agent's input line? True when its first visible glyph (past
+ * leading colour codes and spaces) is a prompt marker. Only such a row carries a
+ * ghost, so only such a row is edited.
+ */
+function isPromptRow(row: string): boolean {
+	const visible = stripTerminalEscapes(row).replace(/^\s+/, "");
+	return visible.length > 0 && PROMPT_GLYPHS.has(visible[0]);
+}
+
+/**
+ * Remove the faint (SGR 2) text an agent's TUI shows AFTER the prompt glyph on its
+ * input line — Claude Code's dimmed ghost autosuggestion (the previous input echoed
+ * back into an EMPTY box) and Codex's `Ask Codex to do anything` placeholder. Peek
+ * used to capture without colour, so that ghost reached a coordinator as plain
+ * `❯ push it and open the PR` and read as a real unsent message; the coordinator
+ * then reported "typed but not sent, press Enter" for a message that had already
+ * landed. Peek now captures with colour and runs this first, so the ghost is
+ * dropped before {@link stripTerminalEscapes} discards the colour it rode in on.
+ *
+ * The drop is scoped to the prompt line ON PURPOSE. Faint is not only used for
+ * ghosts: Codex renders real content faint (ratatui `DIM` = SGR 2) — tool output,
+ * the `Worked for … · HH:MM` line a coordinator reads to know a turn finished — and
+ * Claude Code dims a file read's line-number gutter. Dropping every faint run swept
+ * those away too. So faint is removed only on a row whose first glyph is a prompt
+ * marker, and only after that glyph; the glyph itself, and every other row, are kept.
+ * Newlines and tabs always survive. On text with no colour (the native backend's
+ * plain-text capture, or `dev3 pane logs`) it is a no-op.
+ *
+ * To LABEL the ghost instead of dropping it (an easy flip, see the decision record),
+ * accumulate the dropped run and re-emit it wrapped instead of discarding it.
+ */
+export function dropFaintText(text: string): string {
+	let faint = false;
+	const rows = text.split("\n").map((row) => {
+		const editable = isPromptRow(row);
+		let out = "";
+		let passedGlyph = false;
+		let i = 0;
+		while (i < row.length) {
+			const ch = row[i];
+			if (ch === "\u001b" && row[i + 1] === "[") {
+				const sgr = /^\u001b\[([0-9;]*)m/.exec(row.slice(i));
+				if (sgr) {
+					faint = sgrFaintState(sgr[1], faint);
+					out += sgr[0];
+					i += sgr[0].length;
+					continue;
+				}
+				const csi = /^\u001b\[[0-9;?]*[ -/]*[@-~]/.exec(row.slice(i));
+				if (csi) {
+					out += csi[0];
+					i += csi[0].length;
+					continue;
+				}
+			}
+			// Keep everything up to and including the glyph; drop only faint glyphs after it.
+			const dropped = editable && passedGlyph && faint && ch !== "\t";
+			if (!dropped) out += ch;
+			if (editable && PROMPT_GLYPHS.has(ch)) passedGlyph = true;
+			i++;
+		}
+		return out;
+	});
+	return rows.join("\n");
+}
+
+/**
  * Last `limit` lines plus how many there were, with trailing blank lines dropped
  * so the tail ends on content. The one implementation both surfaces read through:
  * `dev3 peek` wants the text, `dev3 pane logs` also wants the count.

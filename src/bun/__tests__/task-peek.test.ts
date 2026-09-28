@@ -308,6 +308,39 @@ describe.each<Backend>(["tmux", "native"])("dev3 peek on %s", (backend) => {
 		expect(snap.tail?.text).toBe("red\nplain");
 	});
 
+	it("drops a dimmed ghost autosuggestion so it does not read as unsent input", async () => {
+		// An empty input box showing a faint (SGR 2) ghost of a past message — the
+		// exact shape that made a coordinator report "typed but not sent, press Enter".
+		const ghosted = { ...TWO_PANES[0], text: "running tests\n\u001b[39m❯ \u001b[2mpush it and open the PR\u001b[0m" };
+		arrange(backend, [ghosted]);
+
+		const snap = await taskPeek({ task: task() });
+
+		expect(snap.tail?.text).toBe("running tests\n❯ ");
+		// The tmux path must capture WITH colour, or the faint marker never arrives.
+		if (backend === "tmux") {
+			expect(mocks.capturePane).toHaveBeenCalledWith(expect.objectContaining({ escapes: true }));
+		}
+	});
+
+	it("keeps faint content off the prompt line — only the ghost goes (the Codex case)", async () => {
+		// Codex renders real content faint (ratatui DIM = SGR 2): tool output and the
+		// `Worked for` line a coordinator reads to know a turn ended. Both must survive;
+		// only the faint placeholder after the `›` prompt glyph is dropped.
+		const codex = {
+			...TWO_PANES[0],
+			text:
+				"│ \u001b[2mran build, 0 errors\u001b[0m\n"
+				+ "\u001b[2mWorked for 2m 41s · 10:50\u001b[0m\n"
+				+ "\u001b[2m› Ask Codex to do anything\u001b[0m",
+		};
+		arrange(backend, [codex]);
+
+		const snap = await taskPeek({ task: task() });
+
+		expect(snap.tail?.text).toBe("│ ran build, 0 errors\nWorked for 2m 41s · 10:50\n›");
+	});
+
 	it("says freshness is unknown rather than guessing a time", async () => {
 		arrange(backend, [{ ...TWO_PANES[0], lastOutput: null }]);
 
