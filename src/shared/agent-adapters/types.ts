@@ -69,6 +69,31 @@ export interface AdapterLaunchOptions {
 	codex?: CodexLaunchRuntime;
 }
 
+/**
+ * How to ask this agent's CLI which models the signed-in account may actually
+ * select, so the picker can flag presets the account cannot use. Pure data plus a
+ * pure parser — the backend spawns the command and applies `parse`. Omitted on
+ * agents whose CLI has no account-scoped model-list command (Claude, Gemini,
+ * Copilot, OpenCode, omp today).
+ */
+export interface ModelListProbeSpec {
+	/** Args appended to the base command (e.g. `["debug", "models"]`). Must be a
+	 *  read-only "list and exit" subcommand — never one that mutates state. */
+	readonly args: readonly string[];
+	/** Kill the probe after this many ms; a picker never waits longer on it. */
+	readonly timeoutMs: number;
+	/** Parse stdout into the account's selectable model slugs, or null when the
+	 *  output cannot be understood. Null (and, in the executor, an empty list) mean
+	 *  "unknown" → the picker filters nothing rather than risk hiding a real model. */
+	parse(stdout: string): string[] | null;
+	/** Fold a raw slug to the identity a preset's `model` is compared against, and
+	 *  applied to BOTH sides. Cursor bakes reasoning effort into the slug
+	 *  (`gpt-5.6-sol-xhigh`) while `--list-models` enumerates only some effort tiers,
+	 *  so both collapse to the base family. Omitted → exact match (Codex, whose
+	 *  effort is a separate `-c` arg, so its `model` is already the base slug). */
+	normalize?(slug: string): string;
+}
+
 export interface AgentAdapter {
 	/** Registry key: the base command's last path segment (e.g. "claude"). */
 	readonly command: string;
@@ -80,6 +105,9 @@ export interface AgentAdapter {
 	readonly skillBody: string;
 	/** Agent-native trust routines to run, in order. Empty when none. */
 	readonly trustKinds: readonly TrustKind[];
+	/** How to list the account's selectable models, or omitted when the CLI has no
+	 *  such command (the picker then filters nothing for this agent). */
+	readonly modelListProbe?: ModelListProbeSpec;
 
 	/**
 	 * The complete launch command as a token list (base command first), which the

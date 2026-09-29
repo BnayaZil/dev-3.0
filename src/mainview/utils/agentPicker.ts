@@ -181,6 +181,11 @@ export interface PickerGroup {
 	 *  yet and `configs` is empty. Rendered disabled; clicking it starts the
 	 *  connect flow. */
 	locked?: RecommendedModel;
+	/** True when the signed-in account cannot select this model (its slug is
+	 *  absent from the agent CLI's account catalog — see resolveModelAvailability).
+	 *  Rendered disabled with an "unavailable" caption. Never set while
+	 *  availability is unknown, so a failed probe flags nothing. */
+	unavailable?: boolean;
 }
 
 /** Value of the Model field's always-present "connect a provider" row. Not a
@@ -211,8 +216,16 @@ export function lockedModelGroups(
 
 /** Group an agent's configurations by model into ordered picker groups.
  *  First-seen order is preserved for both groups and configs within a group,
- *  so the curated DEFAULT_AGENTS ordering carries through. */
-export function buildPickerGroups(agent: CodingAgent | undefined | null): PickerGroup[] {
+ *  so the curated DEFAULT_AGENTS ordering carries through.
+ *
+ *  `unavailableModels` (raw preset `model` slugs the account cannot select, from
+ *  the `getAgentAvailableModels` probe) marks a group `unavailable` when every one
+ *  of its presets pins such a model. Null/undefined — the common case, and every
+ *  case where availability is unknown — marks nothing. */
+export function buildPickerGroups(
+	agent: CodingAgent | undefined | null,
+	unavailableModels?: ReadonlySet<string> | null,
+): PickerGroup[] {
 	if (!agent) return [];
 	const order: string[] = [];
 	const byLabel = new Map<string, AgentConfiguration[]>();
@@ -226,7 +239,12 @@ export function buildPickerGroups(agent: CodingAgent | undefined | null): Picker
 		}
 		bucket.push(config);
 	}
-	return order.map((label) => ({ label, configs: byLabel.get(label) as AgentConfiguration[] }));
+	return order.map((label) => {
+		const configs = byLabel.get(label) as AgentConfiguration[];
+		const unavailable =
+			!!unavailableModels && configs.every((c) => !!c.model && unavailableModels.has(c.model));
+		return { label, configs, unavailable };
+	});
 }
 
 /** True when a Model group is entirely gated behind the pxpipe token-saving

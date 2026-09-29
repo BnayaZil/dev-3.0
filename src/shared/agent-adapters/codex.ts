@@ -91,6 +91,37 @@ function applyDev3Permissions(args: string[]): void {
 	args.push("-c", shellEscape(DEV3_PERMISSIONS));
 }
 
+/**
+ * The selectable slugs from `codex debug models` (the account's live catalog):
+ * `visibility === "list"` is the selectable set, and `supported_in_api` gates a
+ * slug dev3 could actually launch. A slug offered by a preset but absent here is
+ * a dead pick (e.g. an enterprise plan without `gpt-6-sol`). Null when the JSON
+ * cannot be read, so a broken dump filters nothing.
+ */
+function parseCodexModels(stdout: string): string[] | null {
+	let data: unknown;
+	try {
+		data = JSON.parse(stdout);
+	} catch {
+		return null;
+	}
+	const models = (data as { models?: unknown } | null)?.models;
+	if (!Array.isArray(models)) return null;
+	const slugs: string[] = [];
+	for (const entry of models) {
+		if (
+			entry &&
+			typeof entry === "object" &&
+			(entry as { visibility?: unknown }).visibility === "list" &&
+			(entry as { supported_in_api?: unknown }).supported_in_api === true &&
+			typeof (entry as { slug?: unknown }).slug === "string"
+		) {
+			slugs.push((entry as { slug: string }).slug);
+		}
+	}
+	return slugs;
+}
+
 export const codexAdapter: AgentAdapter = {
 	command: "codex",
 	supportsResume: true,
@@ -99,6 +130,13 @@ export const codexAdapter: AgentAdapter = {
 	supportsPreAssignedSessionId: false,
 	skillBody: CODEX_SKILL_BODY,
 	trustKinds: ["claude", "codex"],
+	// Codex's effort is a separate `-c model_reasoning_effort` arg, so a preset's
+	// `model` is already the bare slug — exact match, no normalize.
+	modelListProbe: {
+		args: ["debug", "models"],
+		timeoutMs: 5000,
+		parse: parseCodexModels,
+	},
 
 	launchArgs(baseCmd, config, ctx, options) {
 		const args: string[] = [];

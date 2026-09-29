@@ -296,6 +296,8 @@ const kanban = {
 	"launch.lockedCaption": "{price}/M вместо {builtin}",
 	"launch.editModels": "Поменять модели в этом пресете",
 	"launch.connectProvider": "+ Подключить провайдера…",
+	"launch.modelUnavailable": "Недоступно в тарифе",
+	"launch.modelUnavailableToast": "Текущий аккаунт не может использовать эту модель. Выберите другую или смените аккаунт.",
 	"launch.mode": "Режим",
 	"launch.variantGroup": "Вариант {n}",
 	"launch.fieldsetLegend": "Конфигурация агента",

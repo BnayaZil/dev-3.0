@@ -187,6 +187,25 @@ describe("buildPickerGroups", () => {
 		expect(buildPickerGroups(undefined)).toEqual([]);
 	});
 
+	it("marks a group unavailable when the account cannot select its model", () => {
+		const groups = buildPickerGroups(claude, new Set(["claude-fable-5"]));
+		const byLabel = Object.fromEntries(groups.map((g) => [g.label, g.unavailable]));
+		expect(byLabel["Fable 5"]).toBe(true);
+		expect(byLabel["Opus 4.8"]).toBe(false);
+	});
+
+	it("marks nothing when availability is unknown (no set passed)", () => {
+		for (const g of buildPickerGroups(claude)) expect(g.unavailable).toBe(false);
+	});
+
+	it("only marks a group unavailable when EVERY preset's model is unavailable", () => {
+		// Opus 4.8 has three presets, all the same model; a set missing that model
+		// leaves the whole group available.
+		const groups = buildPickerGroups(claude, new Set(["claude-opus-4-8[1m]"]));
+		const opus = groups.find((g) => g.label === "Opus 4.8");
+		expect(opus?.unavailable).toBe(true);
+	});
+
 	it("puts model-less custom configs under a single agent-default group", () => {
 		const custom: CodingAgent = {
 			id: "custom",

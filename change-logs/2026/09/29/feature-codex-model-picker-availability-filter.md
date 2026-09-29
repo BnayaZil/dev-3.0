@@ -1,0 +1,3 @@
+Short: Pickers hide models your account lacks
+
+The launch picker now flags model presets the signed-in account can't actually select, so you no longer pick a Codex or Cursor model that fails on launch. Codex is filtered from `codex debug models` (exact slug) and Cursor from `cursor-agent --list-models` (matched on the base model family, since Cursor bakes reasoning effort into the slug). It's a per-adapter probe, so any other harness gains the same filtering the moment its CLI grows a model-list command; agents without one (Claude, Gemini, Copilot, OpenCode, omp) are left unfiltered, and a missing or logged-out CLI filters nothing rather than emptying the picker.
