@@ -2555,6 +2555,12 @@ export interface Task {
 	prUrl?: string | null;
 	/** Last rich status fetched for the task's associated GitHub pull request. */
 	prStatusCache?: TaskPRStatusCache | null;
+	/**
+	 * Every pull request this task has had, oldest first. The current one is still
+	 * `prNumber`; the rest are finished PRs a follow-up replaced. A separate
+	 * top-level field because older app versions rewrite the PR fields above.
+	 */
+	pullRequests?: TaskPullRequestRecord[] | null;
 	groupId: string | null;
 	variantIndex: number | null;
 	/** Future-facing links to other tasks; the data layer fills [] for legacy records on load. */
@@ -3878,6 +3884,16 @@ export function reviewTaskTitle(parts: {
  */
 export type MergeRoute = "pull-request" | "local-squash";
 
+/**
+ * A merged or closed PR stays on screen, but it is no longer the branch's live
+ * PR: it cannot be merged, and it must not stop the next PR from being opened.
+ * An unknown state (offline, not fetched yet) counts as live.
+ */
+export function isPullRequestFinished(state: string | null | undefined): boolean {
+	const normalized = state?.toUpperCase();
+	return normalized === "MERGED" || normalized === "CLOSED";
+}
+
 export interface BranchStatus {
 	ahead: number;
 	behind: number;
@@ -3907,6 +3923,7 @@ export interface BranchStatus {
 	diffFileStats: Array<{ path: string; insertions: number; deletions: number }>; // per-file stats for branch vs base
 	prNumber: number | null; // associated PR number for this branch, null if none was detected
 	prUrl: string | null; // full GitHub PR URL, null if no associated PR was detected
+	prState: string | null; // GitHub state of that PR (OPEN / MERGED / CLOSED), null when unknown
 	mergeCompletionFingerprint: string | null; // stable key for deduping the merged-branch completion prompt
 	// Whether the project repo has an `origin` remote at all. A repo added from a
 	// local folder has none, and then Push / Create PR / PR + auto-merge cannot
@@ -4073,6 +4090,16 @@ export interface TaskPRStatusCache {
 	prTitle: string | null;
 	isDraft: boolean | null;
 	cachedAt: string;
+}
+
+/** One entry of {@link Task.pullRequests}. */
+export interface TaskPullRequestRecord {
+	number: number;
+	url: string;
+	title?: string | null;
+	/** GitHub's state when last seen (OPEN / MERGED / CLOSED); absent when never fetched. */
+	state?: string | null;
+	firstSeenAt: string;
 }
 
 /**
