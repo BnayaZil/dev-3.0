@@ -19,11 +19,13 @@ export function useUnavailableModels(agent: CodingAgent | undefined | null): Set
 		setUnavailable(null);
 		if (!agentId) return;
 		let cancelled = false;
-		api.request
-			.getAgentAvailableModels({ agentId })
+		// Invoke inside the chain so a synchronous throw (e.g. the RPC absent in a
+		// test's partial api mock) becomes a caught rejection → unknown, never a
+		// crash of the picker. Filtering nothing is always the safe fallback.
+		Promise.resolve()
+			.then(() => api.request.getAgentAvailableModels({ agentId }))
 			.then((result) => {
-				if (cancelled) return;
-				setUnavailable(result.status === "resolved" ? new Set(result.unavailable) : null);
+				if (!cancelled) setUnavailable(result?.status === "resolved" ? new Set(result.unavailable) : null);
 			})
 			.catch(() => {
 				if (!cancelled) setUnavailable(null);
