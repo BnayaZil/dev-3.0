@@ -20,6 +20,7 @@ import {
 	prettifyModel,
 } from "../utils/agentPicker";
 import { useModelCatalog } from "../hooks/useModelCatalog";
+import { useUnavailableModels } from "../hooks/useUnavailableModels";
 import {
 	CLAUDE_ROLE_BUILTIN_MODEL,
 	catalogForCurrentRevision,
@@ -180,11 +181,16 @@ function AgentConfigPicker({
 	const favCaretRef = useRef<HTMLButtonElement>(null);
 
 	function handleGatedConfigClick(value: string) {
-		// Two kinds of locked row land here. An offered model is one click from
-		// working, so it opens the flow that makes it work; a pxpipe-gated preset
-		// needs a Settings toggle, and the whole toast is the link to it.
+		// Three kinds of disabled row land here. An offered model is one click from
+		// working, so it opens the flow that makes it work; a model the account
+		// cannot select just explains itself; a pxpipe-gated preset needs a Settings
+		// toggle, and the whole toast is the link to it.
 		if (lockedByLabel.has(value)) {
 			setConnectOpen(true);
+			return;
+		}
+		if (unavailableByLabel.has(value)) {
+			toast.info(t("launch.modelUnavailableToast"), { source: "settings" });
 			return;
 		}
 		toast.info(t("pxpipe.disabledPresetToast"), {
@@ -197,9 +203,17 @@ function AgentConfigPicker({
 	}
 
 	const selectedAgent = agents.find((a) => a.id === agentId);
+	// Preset models the signed-in account cannot select (Codex/Cursor probe their
+	// CLI's catalog; every other agent — and any failed probe — resolves to null,
+	// which flags nothing). Passed the picker's account so the probe reads the same
+	// account a launch would. See useUnavailableModels.
+	const unavailableModels = useUnavailableModels(selectedAgent, accountId);
 	// Provider → Model → Mode cascade: group the flat presets by model (UI-only;
 	// the leaf is still a plain configId).
-	const groups = buildPickerGroups(selectedAgent);
+	const groups = buildPickerGroups(selectedAgent, unavailableModels);
+	// Group labels the account cannot use, so the Model row can disable + caption
+	// them and the disabled-click handler can explain why.
+	const unavailableByLabel = new Set(groups.filter((g) => g.unavailable).map((g) => g.label));
 	// Keyed by group label, which is what the Model field's option values are.
 	const providerCaptions = new Map(
 		groups
@@ -365,7 +379,7 @@ function AgentConfigPicker({
 							...groups.map((g) => ({
 								value: g.label,
 								label: g.label,
-								disabled: groupRequiresPxpipeProxy(g) && !pxpipeProxyEnabled,
+								disabled: (groupRequiresPxpipeProxy(g) && !pxpipeProxyEnabled) || !!g.unavailable,
 								section: builtinSection,
 							})),
 							...lockedGroups.map((g) => ({
@@ -383,7 +397,11 @@ function AgentConfigPicker({
 						growList
 						renderOption={(option) => {
 							const offered = lockedByLabel.get(option.value);
-							const caption = offered ? lockedCaption(offered, t) : providerCaptions.get(option.value);
+							const caption = offered
+									? lockedCaption(offered, t)
+									: unavailableByLabel.has(option.value)
+										? t("launch.modelUnavailable")
+										: providerCaptions.get(option.value);
 							return (
 								<span className="flex items-baseline gap-1.5 min-w-0">
 									<span className="truncate">{option.label}</span>

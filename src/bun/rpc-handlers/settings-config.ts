@@ -4,11 +4,12 @@ import { chmodSync, existsSync, mkdirSync, symlinkSync, unlinkSync } from "node:
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PATHS } from "../electrobun-platform";
-import type { AgentCheckResult, CodingAgent, ConfigSourceEntry, Dev3RepoConfig, GitHubCliStatus, GlobalSettings, HarnessReadinessReport, Project, ProjectSettingsUpdate, RequirementCheckResult, RosettaWarningInfo, ShellAvailability, TelemetryProfile } from "../../shared/types";
+import type { AgentCheckResult, AgentModelAvailability, CodingAgent, ConfigSourceEntry, Dev3RepoConfig, GitHubCliStatus, GlobalSettings, HarnessReadinessReport, Project, ProjectSettingsUpdate, RequirementCheckResult, RosettaWarningInfo, ShellAvailability, TelemetryProfile } from "../../shared/types";
 import { SHELL_FALLBACK_ORDER, type ShellFlavor, shellCandidatePaths } from "../../shared/posix-shell";
 import { getUserShell, resolveUserShell, setShellPreference } from "../shell-env";
 import * as data from "../data";
 import * as agents from "../agents";
+import { resolveModelAvailability } from "../agent-available-models";
 import * as github from "../github";
 import * as updater from "../updater";
 import * as rosetta from "../rosetta";
@@ -410,6 +411,17 @@ async function saveAgents(params: { agents: CodingAgent[] }): Promise<void> {
 	log.info("← saveAgents done");
 }
 
+async function getAgentAvailableModels(params: {
+	agentId: string;
+	accountId?: string | null;
+	refresh?: boolean;
+}): Promise<AgentModelAvailability> {
+	const all = await agents.getAllAgents();
+	const agent = all.find((a) => a.id === params.agentId);
+	if (!agent) return { status: "unknown" };
+	return resolveModelAvailability(agent, { accountId: params.accountId, refresh: params.refresh });
+}
+
 async function checkForUpdate(): Promise<{ updateAvailable: boolean; version: string; error?: string }> {
 	log.info("-> checkForUpdate");
 	const settings = await loadSettings();
@@ -768,6 +780,7 @@ export const settingsConfigHandlers = {
 	installDev3Cli,
 	getAgents,
 	saveAgents,
+	getAgentAvailableModels,
 	checkForUpdate,
 	downloadUpdate,
 	applyUpdate,

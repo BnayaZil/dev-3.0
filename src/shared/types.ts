@@ -768,6 +768,18 @@ export interface CodingAgent {
 export type AgentFamily = "claude" | "codex" | "gemini" | "agent" | "opencode" | "copilot" | "omp" | "none";
 
 /**
+ * Which of an agent's preset models the signed-in account cannot actually select,
+ * from probing the CLI's own model-list command (Codex `debug models`, Cursor
+ * `--list-models`). `unknown` means dev3 could not determine it — the CLI has no
+ * such command, is not logged in, or the probe failed — and the picker must then
+ * filter NOTHING rather than risk hiding a usable model. `unavailable` holds the
+ * raw preset `model` slugs to flag; an empty array means everything is available.
+ */
+export type AgentModelAvailability =
+	| { status: "unknown" }
+	| { status: "resolved"; unavailable: string[] };
+
+/**
  * Prefix used to invoke an installed skill from an agent prompt. Codex reserves
  * `/` for built-in commands; omp registers one slash command per skill under a
  * `skill:` namespace. Unknown commands keep the compatible slash default.
@@ -5144,6 +5156,16 @@ export type AppRPCSchema = {
 			saveAgents: {
 				params: { agents: CodingAgent[] };
 				response: void;
+			};
+			/** Which of an agent's preset models the signed-in account cannot select,
+			 *  by probing the CLI's model-list command (Codex/Cursor today). Best-effort:
+			 *  returns `{ status: "unknown" }` when it cannot tell, so the picker never
+			 *  hides a model on a failed probe. `accountId` selects the account to probe
+			 *  (matching the launch's account resolution); omitted uses the active one.
+			 *  Cached briefly; `refresh` re-probes. */
+			getAgentAvailableModels: {
+				params: { agentId: string; accountId?: string | null; refresh?: boolean };
+				response: AgentModelAvailability;
 			};
 			getTasks: {
 				params: { projectId: string };

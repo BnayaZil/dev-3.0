@@ -283,6 +283,8 @@ const kanban = {
 	"launch.lockedCaption": "{price}/M vs {builtin}",
 	"launch.editModels": "Change the models behind this preset",
 	"launch.connectProvider": "+ Connect a provider…",
+	"launch.modelUnavailable": "Not on your plan",
+	"launch.modelUnavailableToast": "Your signed-in account can't use this model. Pick another, or switch account.",
 	"launch.mode": "Mode",
 	"launch.variantGroup": "Variant {n}",
 	"launch.fieldsetLegend": "Agent configuration",
