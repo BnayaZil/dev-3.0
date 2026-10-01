@@ -411,11 +411,15 @@ async function saveAgents(params: { agents: CodingAgent[] }): Promise<void> {
 	log.info("← saveAgents done");
 }
 
-async function getAgentAvailableModels(params: { agentId: string; refresh?: boolean }): Promise<AgentModelAvailability> {
+async function getAgentAvailableModels(params: {
+	agentId: string;
+	accountId?: string | null;
+	refresh?: boolean;
+}): Promise<AgentModelAvailability> {
 	const all = await agents.getAllAgents();
 	const agent = all.find((a) => a.id === params.agentId);
 	if (!agent) return { status: "unknown" };
-	return resolveModelAvailability(agent, params.refresh ?? false);
+	return resolveModelAvailability(agent, { accountId: params.accountId, refresh: params.refresh });
 }
 
 async function checkForUpdate(): Promise<{ updateAvailable: boolean; version: string; error?: string }> {

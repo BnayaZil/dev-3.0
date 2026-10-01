@@ -7,13 +7,21 @@ vi.mock("../spawn", () => ({
 	spawnSync: vi.fn(),
 }));
 
+// The Codex account env resolution does real fs/registry reads; stub it so the
+// test controls which CODEX_HOME each account maps to.
+vi.mock("../agent-accounts", () => ({
+	getActiveCodexSessionEnv: vi.fn(async () => ({})),
+}));
+
 import { resolveModelAvailability, clearAvailableModelsCache } from "../agent-available-models";
 import { codexAdapter } from "../../shared/agent-adapters/codex";
 import { cursorAdapter } from "../../shared/agent-adapters/cursor";
 import { spawn } from "../spawn";
+import { getActiveCodexSessionEnv } from "../agent-accounts";
 import type { CodingAgent } from "../../shared/types";
 
 const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
+const mockCodexSessionEnv = getActiveCodexSessionEnv as unknown as ReturnType<typeof vi.fn>;
 
 /** A fake Bun subprocess whose stdout is a fixed string. */
 function fakeProc(stdout: string, exitCode = 0) {
@@ -41,6 +49,7 @@ const CODEX_DUMP = JSON.stringify({
 beforeEach(() => {
 	vi.clearAllMocks();
 	clearAvailableModelsCache();
+	mockCodexSessionEnv.mockResolvedValue({});
 });
 
 describe("codex modelListProbe.parse", () => {
@@ -79,6 +88,13 @@ describe("cursor modelListProbe", () => {
 		expect(n("claude-opus-5-thinking-high")).toBe("claude-opus-5");
 		// A slug with no effort suffix is left whole.
 		expect(n("composer-2.5")).toBe("composer-2.5");
+	});
+
+	it("strips ANSI escapes the real CLI emits on stdout", () => {
+		// cursor-agent clears the line / moves the cursor and colours rows even when
+		// piped; the slug must survive that.
+		const out = "\u001B[2K\u001B[GAvailable models\n\n\u001B[1mauto\u001B[0m - Auto\n\u001B[32mgpt-5.6-sol-high\u001B[0m - GPT-5.6 Sol\n";
+		expect(probe.parse(out)).toEqual(["auto", "gpt-5.6-sol-high"]);
 	});
 });
 
@@ -144,5 +160,49 @@ describe("resolveModelAvailability", () => {
 		};
 		const result = await resolveModelAvailability(agent);
 		expect(result).toEqual({ status: "resolved", unavailable: ["gpt-6-sol"] });
+	});
+
+	it("probes each account separately, against its own CODEX_HOME catalog", async () => {
+		// Enterprise home lacks gpt-6-sol; personal home has it. The same preset must
+		// be flagged under one account and allowed under the other.
+		mockCodexSessionEnv.mockImplementation(async (id: string | null | undefined) =>
+			id === "enterprise" ? { CODEX_HOME: "/homes/ent" } : { CODEX_HOME: "/homes/personal" },
+		);
+		const ENT = JSON.stringify({ models: [{ slug: "gpt-6-astra", visibility: "list", supported_in_api: true }] });
+		const PERSONAL = JSON.stringify({
+			models: [
+				{ slug: "gpt-6-astra", visibility: "list", supported_in_api: true },
+				{ slug: "gpt-6-sol", visibility: "list", supported_in_api: true },
+			],
+		});
+		mockSpawn.mockImplementation((_cmd: string[], opts: { env?: Record<string, string> }) =>
+			fakeProc(opts?.env?.CODEX_HOME === "/homes/ent" ? ENT : PERSONAL),
+		);
+		const agent = codexAgent(["gpt-6-astra", "gpt-6-sol"]);
+
+		const ent = await resolveModelAvailability(agent, { accountId: "enterprise" });
+		const personal = await resolveModelAvailability(agent, { accountId: "personal" });
+
+		expect(ent).toEqual({ status: "resolved", unavailable: ["gpt-6-sol"] });
+		expect(personal).toEqual({ status: "resolved", unavailable: [] });
+		// Two distinct accounts → two real probes (cache keyed on CODEX_HOME).
+		expect(mockSpawn).toHaveBeenCalledTimes(2);
+		expect(mockSpawn.mock.calls[0][1].env).toEqual({ CODEX_HOME: "/homes/ent" });
+		expect(mockSpawn.mock.calls[1][1].env).toEqual({ CODEX_HOME: "/homes/personal" });
+	});
+
+	it("honors an explicit CODEX_HOME on the default preset over the account", async () => {
+		mockCodexSessionEnv.mockResolvedValue({ CODEX_HOME: "/homes/account" });
+		mockSpawn.mockReturnValue(fakeProc(CODEX_DUMP));
+		const agent: CodingAgent = {
+			id: "builtin-codex",
+			name: "Codex",
+			baseCommand: "codex",
+			defaultConfigId: "pinned",
+			configurations: [{ id: "pinned", name: "pinned", model: "gpt-6-astra", envVars: { CODEX_HOME: "/homes/pinned" } }],
+		};
+		await resolveModelAvailability(agent, { accountId: "account" });
+		expect(mockSpawn.mock.calls[0][1].env).toEqual({ CODEX_HOME: "/homes/pinned" });
+		expect(mockCodexSessionEnv).not.toHaveBeenCalled();
 	});
 });

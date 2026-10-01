@@ -40,11 +40,18 @@ enumerates only some tiers — a strict match wrongly hid usable models.
   and empty results filter nothing; Cursor uses base-family matching; routed presets
   are exempt. Hiding is a disabled+captioned flag, not deletion, and the preset stays
   in `agents.json`.
-- **Multi-account.** The probe spawns with the ambient CLI login, not dev3's
-  per-account launch env, so a filter can be wrong right after switching accounts.
-  Accepted for v1; the fix is to thread the account env into the probe.
+- **Multi-account** (resolved in review). The probe now resolves the same account the
+  launch would: `resolveModelAvailability` takes the picker's `accountId`, resolves
+  `CODEX_HOME` via `getActiveCodexSessionEnv` (honoring an explicit `CODEX_HOME` on the
+  default preset, like `applyCodexAccountEnv`), spawns the probe with it, and keys the
+  cache on it. `useUnavailableModels` passes the picker's account and re-probes on any
+  account change. So a user whose active/selected account differs from `~/.codex` is
+  filtered against the right catalog.
 - **Launch still possible.** An already-selected unavailable model is flagged, not
   blocked; launching it fails as before. Blocking at launch is a follow-up.
+- **Per-preset `CODEX_HOME`.** The agent-level probe honors only the default preset's
+  explicit `CODEX_HOME`; a non-default preset pinning a different home is not modeled
+  (rare, and it falls back to filtering against the default preset's account).
 
 ## Alternatives considered
 - **Prune presets from `agents.json`** — rejected: destructive migration of shared

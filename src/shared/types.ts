@@ -5160,9 +5160,11 @@ export type AppRPCSchema = {
 			/** Which of an agent's preset models the signed-in account cannot select,
 			 *  by probing the CLI's model-list command (Codex/Cursor today). Best-effort:
 			 *  returns `{ status: "unknown" }` when it cannot tell, so the picker never
-			 *  hides a model on a failed probe. Cached briefly; `refresh` re-probes. */
+			 *  hides a model on a failed probe. `accountId` selects the account to probe
+			 *  (matching the launch's account resolution); omitted uses the active one.
+			 *  Cached briefly; `refresh` re-probes. */
 			getAgentAvailableModels: {
-				params: { agentId: string; refresh?: boolean };
+				params: { agentId: string; accountId?: string | null; refresh?: boolean };
 				response: AgentModelAvailability;
 			};
 			getTasks: {

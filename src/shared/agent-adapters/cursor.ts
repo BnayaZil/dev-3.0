@@ -19,15 +19,23 @@ function cursorModelBase(slug: string): string {
 	return parts.join("-");
 }
 
+/** Drop ANSI CSI escapes (cursor's `--list-models` emits `\e[2K\e[G` and colour
+ *  codes on stdout even when piped), so the parser sees clean text. */
+function stripAnsi(text: string): string {
+	// eslint-disable-next-line no-control-regex
+	return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
+}
+
 /**
  * `cursor-agent --list-models` prints one model per line as `slug - Display Name`
  * under an "Available models" header (no dash). Pull the leading slug from every
- * such row. Empty result is treated as unknown upstream, so a format change or a
- * trust prompt filters nothing rather than wiping the picker.
+ * such row, after stripping ANSI escapes. Empty result is treated as unknown
+ * upstream, so a format change or a trust prompt filters nothing rather than
+ * wiping the picker.
  */
 function parseCursorModels(stdout: string): string[] | null {
 	const slugs: string[] = [];
-	for (const line of stdout.split("\n")) {
+	for (const line of stripAnsi(stdout).split("\n")) {
 		const match = line.match(/^\s*(\S+)\s+-\s+\S/);
 		if (match) slugs.push(match[1]);
 	}

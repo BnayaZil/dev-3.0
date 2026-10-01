@@ -206,6 +206,23 @@ describe("buildPickerGroups", () => {
 		expect(opus?.unavailable).toBe(true);
 	});
 
+	it("never marks a routed (role-bound) group unavailable, even if its slug is unavailable", () => {
+		const agent: CodingAgent = {
+			id: "x",
+			name: "X",
+			baseCommand: "codex",
+			configurations: [
+				{ id: "routed", name: "Routed Preset", model: "gpt-6-sol", modelRoles: { main: "m" } },
+				{ id: "plain", name: "Plain", model: "gpt-6-sol" },
+			],
+		};
+		const groups = buildPickerGroups(agent, new Set(["gpt-6-sol"]));
+		// Role-bound preset gets its own group (labeled by its name) and is exempt.
+		expect(groups.find((g) => g.label === "Routed Preset")?.unavailable).toBe(false);
+		// The plain preset pinning the same unavailable slug is still flagged.
+		expect(groups.find((g) => g.configs.some((c) => c.id === "plain"))?.unavailable).toBe(true);
+	});
+
 	it("puts model-less custom configs under a single agent-default group", () => {
 		const custom: CodingAgent = {
 			id: "custom",

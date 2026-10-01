@@ -214,6 +214,13 @@ export function lockedModelGroups(
 		.map((model) => ({ label: model.label, configs: [], locked: model }));
 }
 
+/** A preset whose model dev3 routes itself (role-bound) or serves through the
+ *  pxpipe proxy — its `model` need not appear in the agent's native account
+ *  catalog, so the availability filter leaves it alone. */
+function isRoutedConfig(config: AgentConfiguration): boolean {
+	return (!!config.modelRoles && Object.keys(config.modelRoles).length > 0) || config.requiresPxpipeProxy === true;
+}
+
 /** Group an agent's configurations by model into ordered picker groups.
  *  First-seen order is preserved for both groups and configs within a group,
  *  so the curated DEFAULT_AGENTS ordering carries through.
@@ -241,8 +248,13 @@ export function buildPickerGroups(
 	}
 	return order.map((label) => {
 		const configs = byLabel.get(label) as AgentConfiguration[];
+		// A group is unavailable only when every preset in it pins a model the
+		// account lacks. A routed/pxpipe preset is exempt (its model need not be in
+		// the account's native catalog), and its presence keeps the whole group
+		// selectable — mirrors the backend's exemption in resolveModelAvailability.
 		const unavailable =
-			!!unavailableModels && configs.every((c) => !!c.model && unavailableModels.has(c.model));
+			!!unavailableModels &&
+			configs.every((c) => !!c.model && !isRoutedConfig(c) && unavailableModels.has(c.model));
 		return { label, configs, unavailable };
 	});
 }

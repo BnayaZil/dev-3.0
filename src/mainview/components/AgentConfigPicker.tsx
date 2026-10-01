@@ -205,8 +205,9 @@ function AgentConfigPicker({
 	const selectedAgent = agents.find((a) => a.id === agentId);
 	// Preset models the signed-in account cannot select (Codex/Cursor probe their
 	// CLI's catalog; every other agent — and any failed probe — resolves to null,
-	// which flags nothing). See useUnavailableModels.
-	const unavailableModels = useUnavailableModels(selectedAgent);
+	// which flags nothing). Passed the picker's account so the probe reads the same
+	// account a launch would. See useUnavailableModels.
+	const unavailableModels = useUnavailableModels(selectedAgent, accountId);
 	// Provider → Model → Mode cascade: group the flat presets by model (UI-only;
 	// the leaf is still a plain configId).
 	const groups = buildPickerGroups(selectedAgent, unavailableModels);
