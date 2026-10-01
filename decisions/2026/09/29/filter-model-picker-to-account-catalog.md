@@ -52,6 +52,14 @@ enumerates only some tiers — a strict match wrongly hid usable models.
 - **Per-preset `CODEX_HOME`.** The agent-level probe honors only the default preset's
   explicit `CODEX_HOME`; a non-default preset pinning a different home is not modeled
   (rare, and it falls back to filtering against the default preset's account).
+- **Logged-out Codex** (resolved in review follow-up). A logged-out `codex debug
+  models` exits 0 and prints its bundled catalog, which would wrongly flag models.
+  `resolveModelAvailability` now checks `<CODEX_HOME>/auth.json` (or an `OPENAI_API_KEY`)
+  before trusting the dump — an unauthenticated home resolves to `unknown`.
+- **Binary override** (resolved in review follow-up). The probe now resolves the same
+  binary a launch would: `applyBinaryPathOverride` (the custom-binary setting) plus the
+  default preset's `baseCommandOverride`, so a user who points dev3 at a custom `codex`
+  probes the binary that will actually run.
 
 ## Alternatives considered
 - **Prune presets from `agents.json`** — rejected: destructive migration of shared

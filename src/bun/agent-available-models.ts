@@ -12,17 +12,24 @@
  * makes the picker filter NOTHING — hiding a model the user can use is worse than
  * the dead entry this feature removes.
  *
- * The probe MUST read the same account the launch would. A Codex launch injects
- * the selected managed account's `CODEX_HOME` (applyCodexAccountEnv →
- * getActiveCodexSessionEnv); the probe resolves it identically so a multi-account
- * user is filtered against the account that will actually run, not whatever login
- * happens to sit in `~/.codex`.
+ * The probe MUST ask the same binary, in the same account, the launch would:
+ *  - binary: the user's custom path (`applyBinaryPathOverride`) and a preset's
+ *    `baseCommandOverride`, exactly as resolveCommandForAgent resolves it;
+ *  - account: the selected managed account's `CODEX_HOME` (getActiveCodexSessionEnv).
+ * And it only trusts a Codex dump when that home is actually logged in — a
+ * logged-out `codex debug models` exits 0 with its bundled catalog, which is not
+ * the account's answer.
  */
 
+import { existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { getActiveCodexSessionEnv } from "./agent-accounts";
+import { applyBinaryPathOverride } from "./agents";
+import { loadSettings } from "./settings";
 import { agentKey, getAgentAdapter } from "../shared/agent-adapters/registry";
 import type { ModelListProbeSpec } from "../shared/agent-adapters/types";
-import type { AgentFamily, AgentModelAvailability, CodingAgent } from "../shared/types";
+import type { AgentConfiguration, AgentFamily, AgentModelAvailability, CodingAgent } from "../shared/types";
 import { spawn } from "./spawn";
 
 /** The probe is a fast local-ish call (~300 ms for Codex), but a picker can open
@@ -36,21 +43,27 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-/** The account whose catalog the probe must read, resolved exactly as a launch
- *  resolves it. Codex only: an explicit `CODEX_HOME` on the default preset wins
- *  (mirrors applyCodexAccountEnv's guard), otherwise the selected/active managed
- *  account's home. Empty for every non-Codex agent and for the system login. */
-async function resolveProbeEnv(
-	agent: CodingAgent,
+/** The Codex account env the probe must read, resolved exactly as a launch
+ *  resolves it: an explicit `CODEX_HOME` on the default preset wins (mirrors
+ *  applyCodexAccountEnv's guard), otherwise the selected/active managed account's
+ *  home. Empty for the system login. */
+async function resolveCodexEnv(
+	defaultConfig: AgentConfiguration | undefined,
 	accountId: string | null | undefined,
 ): Promise<Record<string, string> | undefined> {
-	if (agentKey(agent.baseCommand, agent.agentFamily) !== "codex") return undefined;
-	const defaultConfig =
-		agent.configurations.find((c) => c.id === agent.defaultConfigId) ?? agent.configurations[0];
 	const explicitHome = defaultConfig?.envVars?.CODEX_HOME;
 	if (explicitHome) return { CODEX_HOME: explicitHome };
 	const accountEnv = await getActiveCodexSessionEnv(accountId);
 	return Object.keys(accountEnv).length > 0 ? accountEnv : undefined;
+}
+
+/** Whether the Codex home the probe would read is logged in. A logged-out home
+ *  makes `codex debug models` print its bundled catalog, which wrongly looks like
+ *  "this account lacks these models" — so an unauthenticated home means unknown. */
+function codexHomeIsAuthenticated(env: Record<string, string> | undefined): boolean {
+	if (env?.OPENAI_API_KEY || process.env.OPENAI_API_KEY) return true;
+	const home = env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), ".codex");
+	return existsSync(join(home, "auth.json"));
 }
 
 async function runProbe(
@@ -92,8 +105,8 @@ async function availableSlugs(
 	env: Record<string, string> | undefined,
 	refresh: boolean,
 ): Promise<string[] | null> {
-	// Key on the resolved CODEX_HOME too: two accounts have two catalogs, and a
-	// shared cache would serve one account's models to the other.
+	// Key on the resolved binary + CODEX_HOME: two accounts have two catalogs, and
+	// a custom binary has its own — a shared cache would cross the wires.
 	const key = `${baseCommand}\u0000${family ?? ""}\u0000${env?.CODEX_HOME ?? ""}`;
 	const hit = cache.get(key);
 	if (!refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.slugs;
@@ -109,22 +122,35 @@ export function clearAvailableModelsCache(): void {
 
 /**
  * Which of `agent`'s preset models the account cannot select. Returns `unknown`
- * (→ picker filters nothing) when the agent has no model-list command, the probe
- * fails, or it reports an empty catalog (an empty list is never trusted to mean
- * "you have no models"). Routed presets — bound to model roles or the pxpipe
- * proxy — are exempt: their model legitimately need not appear in the account's
- * native catalog. `accountId` selects the account to probe, matching the picker's
- * per-launch account selector; omitted means the registry's active account.
+ * (→ picker filters nothing) when the agent has no model-list command, the Codex
+ * home is logged out, the probe fails, or it reports an empty catalog (an empty
+ * list is never trusted to mean "you have no models"). Routed presets — bound to
+ * model roles or the pxpipe proxy — are exempt: their model legitimately need not
+ * appear in the account's native catalog. `accountId` selects the account to
+ * probe, matching the picker's per-launch account selector; omitted means the
+ * registry's active account.
  */
 export async function resolveModelAvailability(
 	agent: CodingAgent,
 	opts: { accountId?: string | null; refresh?: boolean } = {},
 ): Promise<AgentModelAvailability> {
-	const spec = getAgentAdapter(agent.baseCommand, agent.agentFamily).modelListProbe;
+	// Resolve the same binary a launch would: the user's custom path override,
+	// then a preset's baseCommandOverride (resolveCommandForAgent, agents.ts).
+	const settings = await loadSettings();
+	const agentWithPath = applyBinaryPathOverride(agent, settings.agentBinaryPaths, settings.agentCustomBinaryPaths);
+	const defaultConfig =
+		agentWithPath.configurations.find((c) => c.id === agentWithPath.defaultConfigId) ?? agentWithPath.configurations[0];
+	const baseCommand = defaultConfig?.baseCommandOverride || agentWithPath.baseCommand;
+	const family = agentWithPath.agentFamily;
+
+	const spec = getAgentAdapter(baseCommand, family).modelListProbe;
 	if (!spec) return { status: "unknown" };
 
-	const env = await resolveProbeEnv(agent, opts.accountId);
-	const slugs = await availableSlugs(agent.baseCommand, agent.agentFamily, spec, env, opts.refresh ?? false);
+	const isCodex = agentKey(baseCommand, family) === "codex";
+	const env = isCodex ? await resolveCodexEnv(defaultConfig, opts.accountId) : undefined;
+	if (isCodex && !codexHomeIsAuthenticated(env)) return { status: "unknown" };
+
+	const slugs = await availableSlugs(baseCommand, family, spec, env, opts.refresh ?? false);
 	if (!slugs || slugs.length === 0) return { status: "unknown" };
 
 	const normalize = spec.normalize ?? ((slug: string) => slug);
@@ -132,7 +158,7 @@ export async function resolveModelAvailability(
 
 	const unavailable: string[] = [];
 	const seen = new Set<string>();
-	for (const config of agent.configurations) {
+	for (const config of agentWithPath.configurations) {
 		if (!config.model) continue;
 		if (config.requiresPxpipeProxy) continue;
 		if (config.modelRoles && Object.keys(config.modelRoles).length > 0) continue;

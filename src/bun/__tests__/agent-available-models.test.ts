@@ -13,15 +13,30 @@ vi.mock("../agent-accounts", () => ({
 	getActiveCodexSessionEnv: vi.fn(async () => ({})),
 }));
 
+// The probe resolves the launch binary via these; stub them so no settings file
+// or the heavy agents module is loaded, and the binary passes through unchanged.
+vi.mock("../settings", () => ({
+	loadSettings: vi.fn(async () => ({ agentBinaryPaths: {}, agentCustomBinaryPaths: {} })),
+}));
+vi.mock("../agents", () => ({
+	applyBinaryPathOverride: vi.fn((agent: CodingAgent) => agent),
+}));
+// The Codex auth gate reads <CODEX_HOME>/auth.json; drive existsSync.
+vi.mock("fs", () => ({ existsSync: vi.fn(() => true) }));
+
 import { resolveModelAvailability, clearAvailableModelsCache } from "../agent-available-models";
 import { codexAdapter } from "../../shared/agent-adapters/codex";
 import { cursorAdapter } from "../../shared/agent-adapters/cursor";
 import { spawn } from "../spawn";
 import { getActiveCodexSessionEnv } from "../agent-accounts";
+import { applyBinaryPathOverride } from "../agents";
+import { existsSync } from "fs";
 import type { CodingAgent } from "../../shared/types";
 
 const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
 const mockCodexSessionEnv = getActiveCodexSessionEnv as unknown as ReturnType<typeof vi.fn>;
+const mockApplyBinaryPathOverride = applyBinaryPathOverride as unknown as ReturnType<typeof vi.fn>;
+const mockExistsSync = existsSync as unknown as ReturnType<typeof vi.fn>;
 
 /** A fake Bun subprocess whose stdout is a fixed string. */
 function fakeProc(stdout: string, exitCode = 0) {
@@ -50,6 +65,9 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	clearAvailableModelsCache();
 	mockCodexSessionEnv.mockResolvedValue({});
+	mockApplyBinaryPathOverride.mockImplementation((agent: CodingAgent) => agent);
+	mockExistsSync.mockReturnValue(true); // codex home is logged in by default
+	delete process.env.OPENAI_API_KEY;
 });
 
 describe("codex modelListProbe.parse", () => {
@@ -204,5 +222,28 @@ describe("resolveModelAvailability", () => {
 		await resolveModelAvailability(agent, { accountId: "account" });
 		expect(mockSpawn.mock.calls[0][1].env).toEqual({ CODEX_HOME: "/homes/pinned" });
 		expect(mockCodexSessionEnv).not.toHaveBeenCalled();
+	});
+
+	it("returns unknown without probing when the Codex home is logged out", async () => {
+		// Logged out: no auth.json and no API key. A logged-out `codex debug models`
+		// still prints its bundled catalog, which must not be trusted as the account.
+		mockExistsSync.mockReturnValue(false);
+		const result = await resolveModelAvailability(codexAgent(["gpt-6-sol"]));
+		expect(result).toEqual({ status: "unknown" });
+		expect(mockSpawn).not.toHaveBeenCalled();
+	});
+
+	it("probes the launch binary: the default preset's baseCommandOverride", async () => {
+		mockSpawn.mockReturnValue(fakeProc(CODEX_DUMP));
+		const agent: CodingAgent = {
+			id: "builtin-codex",
+			name: "Codex",
+			baseCommand: "codex",
+			defaultConfigId: "custom",
+			configurations: [{ id: "custom", name: "custom", model: "gpt-6-astra", baseCommandOverride: "/opt/my/codex" }],
+		};
+		await resolveModelAvailability(agent);
+		expect(mockApplyBinaryPathOverride).toHaveBeenCalledWith(agent, {}, {});
+		expect(mockSpawn.mock.calls[0][0]).toEqual(["/opt/my/codex", "debug", "models"]);
 	});
 });
