@@ -1,0 +1,1 @@
+Fix typing "f" (or using arrow keys) inside an image comment field toggling lightbox fullscreen or paging through images instead of entering the character, by having the lightbox keyboard handler skip while a comment input is focused.

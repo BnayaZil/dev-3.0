@@ -250,6 +250,9 @@ export default function TaskImageViewer({ images, initialIndex, onClose, taskId,
 				else video.pause();
 				return;
 			}
+			// A focused comment field owns its own text (typing "f" or using arrow
+			// keys to move the cursor must not fall through to lightbox navigation).
+			if (target?.closest("input, textarea, [contenteditable='true']")) return;
 			if (e.key === "ArrowRight") { consume(); go(1); }
 			else if (e.key === "ArrowLeft") { consume(); go(-1); }
 			else if (e.key === "Home") { consume(); setIndex(0); }
