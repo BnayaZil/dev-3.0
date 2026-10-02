@@ -1,0 +1,3 @@
+Short: Picker filter respects login and binary
+
+The model-picker availability filter now probes the same Codex binary and account a launch actually uses — honoring a custom binary path and a preset's baseCommandOverride, and the selected account's CODEX_HOME — and treats a logged-out Codex home (no or emptied auth.json) as "unknown" instead of trusting the bundled catalog it prints; a preset launching a different binary is no longer judged by the default preset's catalog. So models are no longer wrongly greyed for users on a custom binary, a managed account, or a logged-out CLI. Follow-up to the model-picker filter review.
