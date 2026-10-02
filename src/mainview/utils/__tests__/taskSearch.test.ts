@@ -51,6 +51,7 @@ function ctx(overrides: Partial<TaskQueryContext> = {}): TaskQueryContext {
 		agentName: null,
 		statusValues: [],
 		priorityValue: "",
+		taskType: "standard",
 		spaceNames: [],
 		hasPort: false,
 		isHidden: false,
@@ -456,5 +457,26 @@ describe("is:home flag", () => {
 
 	it("ANDs with the space facet to mean an impossible set", () => {
 		expect(matchesTaskQuery(makeTask(), "is:home space:Labs", ctx({ spaceNames: [] }))).toBe(false);
+	});
+});
+
+describe("matchesTaskQuery — type facet", () => {
+	it("matches the task's type, substring, case-insensitive", () => {
+		const coordinator = ctx({ taskType: "coordinator" });
+		expect(matchesTaskQuery(makeTask(), "type:coordinator", coordinator)).toBe(true);
+		expect(matchesTaskQuery(makeTask(), "type:Coord", coordinator)).toBe(true);
+		expect(matchesTaskQuery(makeTask(), "type:pr-review", coordinator)).toBe(false);
+		expect(matchesTaskQuery(makeTask(), "type:review", ctx({ taskType: "pr-review" }))).toBe(true);
+	});
+
+	it("ORs repeated type tokens and ANDs with other facets", () => {
+		const review = ctx({ taskType: "pr-review", priorityValue: "p1" });
+		expect(matchesTaskQuery(makeTask(), "type:standard type:pr-review", review)).toBe(true);
+		expect(matchesTaskQuery(makeTask(), "type:pr-review priority:P0", review)).toBe(false);
+	});
+
+	it("counts as a facet token, not free text", () => {
+		expect(parseTaskQuery("type:coordinator login").facets.type).toEqual(["coordinator"]);
+		expect(countActiveFacetTokens("type:coordinator login")).toBe(1);
 	});
 });

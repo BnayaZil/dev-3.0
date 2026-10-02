@@ -7,7 +7,7 @@ import { earlierPullRequests } from "../../shared/task-pull-requests";
  *
  * The search string is the SINGLE source of truth for both free-text search
  * and structured filtering. A query mixes recognized facet tokens
- * (`label:"Bug Fix" agent:Codex status:review is:attention has:port`) with
+ * (`label:"Bug Fix" agent:Codex status:review type:coordinator is:attention has:port`) with
  * ordinary free text (`login`). The same parser drives the Kanban filter bar
  * and the Active Tasks sidebar so both surfaces behave identically.
  *
@@ -22,7 +22,7 @@ import { earlierPullRequests } from "../../shared/task-pull-requests";
  */
 
 /** Ordered set of recognized facet keys. Extend here to add a facet. */
-export const FACET_KEYS = ["priority", "label", "agent", "status", "space", "is", "has"] as const;
+export const FACET_KEYS = ["priority", "label", "agent", "status", "type", "space", "is", "has"] as const;
 export type FacetKey = (typeof FACET_KEYS)[number];
 
 /**
@@ -40,6 +40,8 @@ export interface TaskQueryContext {
 	 * is parked in one (see `taskStatusValues`).
 	 */
 	statusValues: string[];
+	/** The task's type id: `standard` for an untyped task, else its `TaskType`. */
+	taskType: string;
 	/** True when the task currently has at least one allocated port. */
 	hasPort: boolean;
 	/** True when the task needs the user's attention (see `is:attention`). */
@@ -89,6 +91,11 @@ const FACET_DEFS: Record<FacetKey, FacetDef> = {
 		key: "status",
 		kind: "free",
 		match: (ctx, v) => ctx.statusValues.some((s) => s.toLowerCase().includes(v)),
+	},
+	type: {
+		key: "type",
+		kind: "free",
+		match: (ctx, v) => ctx.taskType.includes(v),
 	},
 	space: {
 		key: "space",
@@ -143,7 +150,7 @@ function unescapeDslValue(inner: string): string {
 }
 
 function emptyFacets(): Record<FacetKey, string[]> {
-	return { priority: [], label: [], agent: [], status: [], space: [], is: [], has: [] };
+	return { priority: [], label: [], agent: [], status: [], type: [], space: [], is: [], has: [] };
 }
 
 /**

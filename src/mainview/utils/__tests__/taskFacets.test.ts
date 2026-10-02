@@ -143,7 +143,7 @@ describe("buildFilterGroups", () => {
 		{ facet: "priority", value: "P3", label: "P3 — Low" },
 		{ facet: "priority", value: "P4", label: "P4 — Lowest" },
 	];
-	const candidates = { priorityCandidates, statusCandidates, flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated" } };
+	const candidates = { priorityCandidates, statusCandidates, flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated" }, typeLabels: { standard: "Standard", coordinator: "Coordinator", "pr-review": "PR review" } };
 
 	function resolverFor(): FacetResolver {
 		const labelsById: Record<string, Label[]> = {
@@ -201,6 +201,33 @@ describe("buildFilterGroups", () => {
 		expect(taskQueryContext(dead, resolverFor()).isHibernated).toBe(true);
 	});
 
+	it("drops the TYPES group when every task is standard", () => {
+		const groups = buildFilterGroups([makeTask({ id: "working" })], resolverFor(), candidates);
+		expect(groups.map((g) => g.id)).not.toContain("types");
+	});
+
+	it("lists present task types after STATUS, standard first, then the TASK_TYPES order", () => {
+		const tasks = [
+			makeTask({ id: "a", taskType: "pr-review" }),
+			makeTask({ id: "b" }),
+			makeTask({ id: "c", taskType: "coordinator" }),
+		];
+		const groups = buildFilterGroups(tasks, resolverFor(), candidates);
+		const ids = groups.map((g) => g.id);
+		expect(ids.indexOf("types")).toBe(ids.indexOf("status") + 1);
+		const types = groups.find((g) => g.id === "types")!.options;
+		expect(types.map((o) => `${o.facet}:${o.value}`)).toEqual(["type:standard", "type:coordinator", "type:pr-review"]);
+		expect(types.map((o) => o.label)).toEqual(["Standard", "Coordinator", "PR review"]);
+	});
+
+	it("puts an untyped task in the query context as standard, so type:standard finds it", () => {
+		const untyped = makeTask({ id: "b" });
+		expect(taskQueryContext(untyped, resolverFor()).taskType).toBe("standard");
+		expect(matchesTaskQuery(untyped, "type:standard", taskQueryContext(untyped, resolverFor()))).toBe(true);
+		const coord = makeTask({ id: "c", taskType: "coordinator" });
+		expect(matchesTaskQuery(coord, "type:standard", taskQueryContext(coord, resolverFor()))).toBe(false);
+	});
+
 	it("returns no groups for an empty task list", () => {
 		expect(buildFilterGroups([], resolverFor(), candidates)).toEqual([]);
 	});
@@ -219,6 +246,7 @@ describe("buildFilterGroups — SPACES group", () => {
 		priorityCandidates: [{ facet: "priority" as const, value: "P2", label: "P2 — Normal" }],
 		statusCandidates: [{ facet: "status" as const, value: "in-progress", label: "Agent is Working" }],
 		flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated" },
+		typeLabels: { standard: "Standard", coordinator: "Coordinator", "pr-review": "PR review" },
 	};
 
 	it("lists every space present in the pool, alphabetically, after STATUS", () => {

@@ -399,6 +399,11 @@ function ActiveTasksSidebar({
 				hidden: t("filter.flag.hidden"),
 				hibernated: t("filter.flag.hibernated"),
 			},
+			typeLabels: {
+				standard: t("createTask.taskTypeStandard"),
+				coordinator: t("createTask.taskTypeCoordinator"),
+				"pr-review": t("createTask.taskTypeReview"),
+			},
 		}),
 		[scopedTasks, resolver, priorityCandidates, statusCandidates, t],
 	);
