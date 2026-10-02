@@ -90,8 +90,9 @@ updater waiting because their output age cannot be observed after a server resta
 Two caveats worth knowing:
 
 - **Under systemd** the unit's cgroup is torn down when the unit stops. Silent updates wait
-  for running agents, but a manual restart can still interrupt them. The update also loses
-  `cloudflared`, so the public URL changes — re-run `dev3 remote url`.
+  for running agents, but a manual restart can still interrupt them (a `--no-tunnel` service can
+  opt out, see [Keep agents alive across restarts](#run-it-as-a-service-linux)). The update also
+  loses `cloudflared`, so the public URL changes — re-run `dev3 remote url`.
 - **There is no "updating…" screen.** A silent overnight restart looks exactly like the box
   falling over. `dev3 remote status` prints a `Last update:` line that explains it.
 
@@ -104,6 +105,41 @@ dev3 remote uninstall-service
 
 Tip: `sudo loginctl enable-linger $USER` keeps user services running while you are logged out.
 Under systemd the log goes to the journal: `journalctl --user -u dev3-remote.service -f`.
+
+Stop any foreground or backgrounded `dev3 remote` on the same port first (`dev3 remote stop`).
+Otherwise the unit cannot bind, and systemd restarts it in a loop, logging `Is port <n> in use?`
+each time.
+
+**Keep agents alive across restarts (optional, `--no-tunnel` only).** Agent terminals run in a
+tmux server that dev3 starts, so they belong to the unit's cgroup, and systemd's default
+`KillMode=control-group` kills them all whenever the unit stops or restarts. A service started
+with `--no-tunnel` can opt out with a drop-in (`systemctl --user edit dev3-remote.service`):
+
+```ini
+[Service]
+KillMode=process
+# Optional: the unit does not inherit your shell's environment.
+Environment=DEV3_TELEMETRY=off
+```
+
+Then `systemctl --user restart dev3-remote`. The drop-in survives a later `install-service`, which
+rewrites the unit itself. Do not use it with the tunnel on: a silent update exits without stopping
+`cloudflared` (under systemd it counts on the unit taking it down), so the old one keeps serving the
+old public URL while the new server starts another. systemd also logs the surviving processes as
+"left-over" on every start; that is expected.
+
+The flip side: `systemctl --user stop`, `dev3 remote stop` and `uninstall-service` now stop only
+the server, and the agents keep running. To take everything down, run
+`systemctl --user kill dev3-remote` while the unit is up: it signals every process in the unit's
+cgroup, agents included.
+
+### WSL: the UI in a Windows browser
+
+Run the server inside WSL2 with `--no-tunnel --host 127.0.0.1 --port <n>` and open
+`http://localhost:<n>` in a Windows browser: WSL forwards Windows `localhost` into the distro, and
+`http://localhost` is a secure context, so notifications and clipboard work without HTTPS. Full
+walkthrough, including where projects should live and per-project Claude Code logins:
+[Install: Windows via WSL](install.md#windows-via-wsl-with-the-ui-in-a-windows-browser).
 
 ## Useful start flags
 

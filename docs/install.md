@@ -5,6 +5,7 @@ in the [README quick start](../README.md#quick-start) — this page is the full 
 
 - [macOS desktop app](#macos--desktop-app)
 - [Windows — zip download](#windows--zip-download)
+- [Windows via WSL, with the UI in a Windows browser](#windows-via-wsl-with-the-ui-in-a-windows-browser)
 - [Linux](#linux)
 - [tmux on Linux — the version matters](#tmux-on-linux--the-version-matters)
 - [Cloud VM caveats](#cloud-vm-caveats)
@@ -67,6 +68,130 @@ marked "Latest" — canary builds are not tested releases.
 
 Every Windows zip, on either channel, is the exact tree CI extracted and launched on a Windows
 runner before publishing — that is the only guarantee on offer, and it is not the same as "tested".
+
+## Windows via WSL, with the UI in a Windows browser
+
+The alternative to the zip: run the Linux `dev3` engine inside WSL2, where agents get real tmux
+terminals and a Linux toolchain, and open the UI in a browser on Windows. Nothing runs on the
+Windows side except the browser.
+
+### Pick a topology
+
+| | Projects live on | Worktrees and engine on | Use it when |
+|---|---|---|---|
+| **Full WSL** | the WSL ext4 filesystem (`~/src/...`) | ext4 | The repo is backed by a remote anyway. Fastest by a wide margin |
+| **Hybrid** | a Windows drive (`/mnt/c/...`, `/mnt/e/...`) | ext4 | The project tree has to stay on the Windows drive (Windows tools own it, or it must survive a distro reset) |
+
+Every file access under `/mnt/<drive>` crosses the 9p bridge between WSL and Windows, and that is
+slow for anything that touches many small files: on one machine `bun install` in a project on
+`/mnt/e` took about six minutes, and the test suite never finished. Full WSL avoids the bridge
+entirely.
+
+Hybrid keeps the heavy part off it. dev3 puts task worktrees under `~/.dev3.0/worktrees/`, which
+is on ext4 whatever the project path is, so dependency installs, builds and tests inside a task run
+at native speed. What still crosses the bridge is the main checkout and its `.git` directory: git
+operations in a task read the shared object store over 9p, and each worktree's index and admin data
+live in the main repo's `.git/worktrees/`, so they cross it too. Work done directly in the main
+checkout is as slow as before. Do not run `git worktree prune` from a Windows git client on that
+repo, and keep Windows-side tools from running `git gc` there (it prunes worktrees too): Windows
+git cannot resolve the `/home/...` worktree paths, treats them as gone and deletes their admin
+data, which breaks every task worktree.
+
+### Install
+
+Inside the WSL distro (Ubuntu shown). WSL2 with systemd is assumed; recent Ubuntu images enable it
+by default, otherwise set `systemd=true` under `[boot]` in `/etc/wsl.conf` and run `wsl --shutdown`
+from Windows.
+
+```sh
+sudo apt-get update && sudo apt-get install -y tmux git
+case "$(uname -m)" in aarch64|arm64) A=arm64;; *) A=x64;; esac   # Windows on ARM runs an arm64 distro
+curl -fsSL -o /tmp/dev3.tar.gz \
+  "https://github.com/h0x91b/dev-3.0/releases/latest/download/dev3-cli-linux-$A.tar.gz"
+mkdir -p ~/.dev3 && tar -C ~/.dev3 -xzf /tmp/dev3.tar.gz
+echo 'export PATH=$HOME/.dev3:$PATH' >> ~/.bashrc && export PATH=$HOME/.dev3:$PATH
+```
+
+Check `tmux -V` against [tmux on Linux](#tmux-on-linux--the-version-matters). `cloudflared` is not
+needed: the browser is on the same machine, so the public tunnel stays off.
+
+### First run, in the foreground
+
+```sh
+DEV3_TELEMETRY=off dev3 remote --no-detach --no-tunnel --host 127.0.0.1 --port 8090
+```
+
+- `DEV3_TELEMETRY=off` turns telemetry off from the first start. Leave it out if you are happy to
+  send it; the in-app toggle works either way.
+- `--no-tunnel` skips the Cloudflare quick tunnel.
+- `--host 127.0.0.1` keeps the server off the network. The default bind is `0.0.0.0`, and under
+  WSL's mirrored networking mode that puts the sign-in page on your LAN.
+- `--port 8090` gives a stable address to bookmark.
+
+Open the printed URL in a Windows browser: `http://localhost:8090/...`. WSL forwards connections
+to `localhost` on Windows into the distro (WSL's default `localhostForwarding`; do not disable it
+in `.wslconfig`). `http://localhost` counts as a secure context in browsers, so notifications and
+clipboard access work without HTTPS or a certificate.
+
+### Run it as a service
+
+Once the foreground run works, stop it with Ctrl-C **before** installing the service. A second
+server on the same port does not start; under systemd it fails, restarts, fails again, and the
+journal shows `Is port 8090 in use?` on every attempt.
+
+```sh
+dev3 remote install-service --no-start --no-tunnel --host 127.0.0.1 --port 8090
+sudo loginctl enable-linger $USER   # start with the distro, not with your first shell
+systemctl --user edit dev3-remote.service
+```
+
+`--no-start` matters: without it the service starts right away, before the drop-in below exists,
+and runs with telemetry on until you restart it.
+
+Put this in the drop-in that `systemctl --user edit` opens:
+
+```ini
+[Service]
+Environment=DEV3_TELEMETRY=off
+KillMode=process
+```
+
+then `systemctl --user start dev3-remote`. `KillMode=process` keeps running agents alive when the
+service restarts; it is safe here only because this setup runs `--no-tunnel` (why:
+[Keep agents alive across restarts](remote-access.md#run-it-as-a-service-linux)). It also means
+stopping the service no longer stops the agents; that section shows how to take them down too.
+`Environment=DEV3_TELEMETRY=off` is needed because the unit does not carry your shell's
+environment. Edit the drop-in, not the unit: `install-service` rewrites the unit on every run.
+
+WSL may stop the whole distro, systemd services included, shortly after its last terminal closes,
+which takes dev3 and every agent with it; and nothing starts the distro when Windows boots. If
+that happens on your machine, keep a WSL terminal open while agents run, or look at the idle
+settings in Microsoft's `.wslconfig` documentation for your WSL version.
+
+### Claude Code: one login per project
+
+To run each project under its own Claude Code config dir (and so its own account), pin it in the
+project's `.dev3/config.local.json`, which stays out of git:
+
+```json
+{ "env": { "CLAUDE_CONFIG_DIR": "/home/you/.claude-acme" } }
+```
+
+Keep that dir **outside the repo**. Claude Code stores the account's login token
+(`.credentials.json`, plain text on Linux), its settings and every session transcript there, so a
+dir inside the project tree is one `git add -A` away from publishing the token, and on a Windows
+drive (`/mnt/...`) its file permissions are not enforced either.
+
+Two things break this:
+
+- **A dev3 managed account.** Once any account exists in dev3's account switcher, dev3 sets
+  `CLAUDE_CONFIG_DIR` for every Claude session it launches, to the active account's dir, or unsets
+  it when the system login is selected. Either way the project's pin is lost. Pin per project, or
+  use managed accounts, not both.
+- **`CLAUDE_PROJECT_DIR` inside a task is the worktree**, not the project's main checkout. A
+  settings file that references `$CLAUDE_PROJECT_DIR/.claude/...` (hooks, a status line) points
+  into the worktree in a task, which has only what git tracks. Keep such files tracked, or
+  reference them by absolute path.
 
 ## Linux
 
