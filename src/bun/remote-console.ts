@@ -14,6 +14,8 @@ import QRCode from "qrcode";
 import { networkInterfaces } from "node:os";
 import { createLogger } from "./logger";
 import { tunnelManager } from "./cloudflare-tunnel";
+import { isLoopbackListen } from "./remote-listen-host";
+import { isScannableAccessUrl } from "../shared/remote-listen-host";
 
 const log = createLogger("remote-console");
 
@@ -57,14 +59,16 @@ export async function renderHeadlessBanner(opts: BannerOptions): Promise<void> {
 
 	// Terminal-rendered QR. `small: true` halves the vertical size by using
 	// half-blocks (▀/▄) — stays readable by phone cameras.
-	const qrAscii = await QRCode.toString(accessUrl, { type: "terminal", small: true });
+	const qrAscii = isScannableAccessUrl(accessUrl)
+		? await QRCode.toString(accessUrl, { type: "terminal", small: true })
+		: null;
 
 	console.log("");
 	console.log("╔════════════════════════════════════════════════════════════════╗");
 	console.log("║  dev3 remote — headless mode                                   ║");
 	console.log("╚════════════════════════════════════════════════════════════════╝");
 	console.log("");
-	console.log(qrAscii);
+	if (qrAscii) console.log(qrAscii);
 	console.log("  URL (includes one-time QR token, regenerated every 60s):");
 	console.log(`  ${accessUrl}`);
 	if (staticCode) {
@@ -97,10 +101,13 @@ export function startQrAutoRefresh(urlFactory: () => Promise<string>): void {
 		}
 		try {
 			const fresh = await urlFactory();
-			const qrAscii = await QRCode.toString(fresh, { type: "terminal", small: true });
 			console.log("");
-			console.log("── QR refreshed ──────────────────────────────────────────────");
-			console.log(qrAscii);
+			if (isScannableAccessUrl(fresh)) {
+				console.log("── QR refreshed ──────────────────────────────────────────────");
+				console.log(await QRCode.toString(fresh, { type: "terminal", small: true }));
+			} else {
+				console.log("── Access URL refreshed ──────────────────────────────────────");
+			}
 			console.log(`  URL: ${fresh}`);
 			console.log("");
 		} catch (err) {
@@ -157,7 +164,11 @@ function printConnectionTips(opts: TipsOptions): void {
 		console.log("");
 	}
 
-	if (ips.length > 0) {
+	if (isLoopbackListen()) {
+		console.log("    ② This machine only — the server is bound to 127.0.0.1.");
+		console.log(`       Open http://localhost:${port}/ here; LAN devices cannot connect.`);
+		console.log("");
+	} else if (ips.length > 0) {
 		console.log("    ② Same LAN — scan the QR from a device on your network.");
 		console.log(`       LAN IPs: ${ips.join(", ")}`);
 		console.log("");

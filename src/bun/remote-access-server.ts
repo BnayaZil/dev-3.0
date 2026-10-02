@@ -29,6 +29,7 @@ import { loadSettingsSync } from "./settings";
 import { getCurrentUiTheme } from "./theme-state";
 import { telemetryBootstrapScript } from "./analytics-identity";
 import { buildSignInLink } from "../shared/remote-sign-in-link";
+import { isLoopbackListen, resolveListenHost } from "./remote-listen-host";
 
 const log = createLogger("remote-access");
 
@@ -663,7 +664,7 @@ export async function startRemoteAccessServer(options: StartOptions): Promise<vo
 
 	const requestedPort = resolveListenPort();
 	const server = Bun.serve<WsData>({
-		hostname: "0.0.0.0",
+		hostname: resolveListenHost(), // 0.0.0.0 unless pinned via DEV3_REMOTE_HOST
 		port: requestedPort, // 0 = random, otherwise pinned via DEV3_REMOTE_PORT
 		async fetch(req, server) {
 			const url = new URL(req.url);
@@ -985,6 +986,8 @@ export function pushToBrowserClients(name: string, payload: any): void {
 // ── Access URL helpers ──────────────────────────────────────────────
 
 function getLocalIp(): string {
+	// A loopback bind is unreachable on any LAN address.
+	if (isLoopbackListen()) return "localhost";
 	const interfaces = networkInterfaces();
 	for (const name of Object.keys(interfaces)) {
 		for (const iface of (interfaces[name] ?? [])) {
@@ -1004,6 +1007,10 @@ function getLocalIp(): string {
  */
 export function getLocalInterfaces(): RemoteNetInterface[] {
 	const out: RemoteNetInterface[] = [];
+	// Same spelling getLocalIp() advertises, so the picker's selected value is one of its options.
+	if (isLoopbackListen()) {
+		return [{ name: "loopback", address: "localhost", internal: true }];
+	}
 	const interfaces = networkInterfaces();
 	for (const name of Object.keys(interfaces)) {
 		for (const iface of (interfaces[name] ?? [])) {

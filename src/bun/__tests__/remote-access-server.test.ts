@@ -489,3 +489,76 @@ describe("isRemoteAccessActive", () => {
 		expect(isRemoteAccessActive()).toBe(false);
 	});
 });
+
+// ================================================================
+// DEV3_REMOTE_HOST (listen address)
+// ================================================================
+
+import { resolveListenHost, isLoopbackListen } from "../remote-listen-host";
+import { listenHostError, isScannableAccessUrl } from "../../shared/remote-listen-host";
+
+describe("resolveListenHost", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("defaults to 0.0.0.0 when unset, keeping the historical bind", () => {
+		vi.stubEnv("DEV3_REMOTE_HOST", "");
+		expect(resolveListenHost()).toBe("0.0.0.0");
+	});
+
+	it("honours loopback and maps localhost to 127.0.0.1", () => {
+		vi.stubEnv("DEV3_REMOTE_HOST", "127.0.0.1");
+		expect(resolveListenHost()).toBe("127.0.0.1");
+		vi.stubEnv("DEV3_REMOTE_HOST", "localhost");
+		expect(resolveListenHost()).toBe("127.0.0.1");
+	});
+
+	it("falls back to loopback, never every interface, on a value it cannot bind", () => {
+		vi.stubEnv("DEV3_REMOTE_HOST", "::1");
+		expect(resolveListenHost()).toBe("127.0.0.1");
+		vi.stubEnv("DEV3_REMOTE_HOST", "192.168.1.5");
+		expect(resolveListenHost()).toBe("127.0.0.1");
+	});
+
+	it("treats only 127.0.0.1 as loopback", () => {
+		expect(isLoopbackListen("127.0.0.1")).toBe(true);
+		expect(isLoopbackListen("0.0.0.0")).toBe(false);
+		expect(isLoopbackListen("192.168.1.5")).toBe(false);
+	});
+
+	it("isScannableAccessUrl rejects loopback URLs and keeps LAN and tunnel ones", () => {
+		expect(isScannableAccessUrl("http://localhost:8090/?token=t")).toBe(false);
+		expect(isScannableAccessUrl("http://127.0.0.1:8090/?token=t")).toBe(false);
+		expect(isScannableAccessUrl("http://192.168.1.5:8090/?token=t")).toBe(true);
+		expect(isScannableAccessUrl("https://x.trycloudflare.com/?token=t")).toBe(true);
+	});
+
+	it("listenHostError accepts loopback or every interface, nothing else", () => {
+		expect(listenHostError("127.0.0.1")).toBeNull();
+		expect(listenHostError("localhost")).toBeNull();
+		expect(listenHostError("0.0.0.0")).toBeNull();
+		// A specific LAN address would strand the tunnel, which dials localhost.
+		expect(listenHostError("192.168.1.5")).toContain("127.0.0.1, localhost or 0.0.0.0");
+		expect(listenHostError("127.0.0.2")).not.toBeNull();
+		expect(listenHostError("example.com")).not.toBeNull();
+	});
+});
+
+describe("loopback bind narrows the advertised addresses", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("offers only loopback in the interface picker", () => {
+		vi.stubEnv("DEV3_REMOTE_HOST", "127.0.0.1");
+		expect(getLocalInterfaces()).toEqual([{ name: "loopback", address: "localhost", internal: true }]);
+		expect(getLocalInterfaces().map((i) => i.address)).toContain(resolveAccessHost());
+	});
+
+	it("builds the default access URL on localhost, not a LAN address", async () => {
+		vi.stubEnv("DEV3_REMOTE_HOST", "127.0.0.1");
+		expect(resolveAccessHost()).toBe("localhost");
+		expect(await getAccessUrl()).toContain("http://localhost:");
+	});
+});

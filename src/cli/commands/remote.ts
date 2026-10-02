@@ -6,7 +6,7 @@ import type { RemoteAccessInfo } from "../../shared/types";
 import { exitError, exitUsage, printDetail } from "../output";
 import { rejectUnknownFlags } from "../flag-validation";
 import { sendRequest } from "../socket-client";
-import { installRemoteService, uninstallRemoteService } from "./remote-service";
+import { installRemoteService, parseHostFlag, uninstallRemoteService } from "./remote-service";
 import { STATIC_CODE_PUBLIC_TUNNEL_WARNING, shouldWarnAboutPublicTunnel } from "../remote-static-code-notice";
 import { CLI_EXIT_CODE_APP_NOT_RUNNING } from "../../shared/cli-exit-codes";
 import { MIN_REMOTE_STATIC_CODE_LENGTH, remoteStaticCodeError } from "../../shared/remote-static-code";
@@ -19,17 +19,18 @@ import {
 	readRemoteState,
 	releaseStartLock,
 } from "../../bun/remote-state";
+import { listenHostError, isScannableAccessUrl } from "../../shared/remote-listen-host";
 
 const REMOTE_HELP = `dev3 remote — run dev-3.0 in headless mode with a browser UI.
 
 Usage:
-  dev3 remote [start] [--no-detach] [--no-tunnel] [--expose-ports=<ports>] [--port <n>] [--views-dir <path>]
+  dev3 remote [start] [--no-detach] [--no-tunnel] [--expose-ports=<ports>] [--port <n>] [--host <addr>] [--views-dir <path>]
   dev3 remote status
   dev3 remote url
   dev3 remote restart [<start flags>]
   dev3 remote logs [--follow] [--lines <n>]
   dev3 remote stop
-  dev3 remote install-service [--port <n>] [--no-tunnel] [--no-start]
+  dev3 remote install-service [--port <n>] [--host <addr>] [--no-tunnel] [--no-start]
   dev3 remote uninstall-service
 
   (default subcommand is "start"; bare "dev3 remote" starts the server in the
@@ -99,6 +100,13 @@ Flags (start):
       preconfigure an SSH \`-L\` forward without scraping the banner line.
       Valid range: 1-65535. Defaults to a random free port.
 
+  --host <addr>
+      Address to listen on. Defaults to 0.0.0.0 (every interface, so LAN
+      devices can scan the QR). Pass 127.0.0.1 (or localhost) to accept
+      connections from this machine only: a local browser, an SSH -L forward
+      and the tunnel still work, the LAN does not. Combine with --no-tunnel
+      for a fully local server. Accepts 127.0.0.1, localhost or 0.0.0.0.
+
   --views-dir <path>
       Override the directory served as static assets (defaults to the
       dist/ next to the binary, or the current working directory's ./dist).
@@ -132,6 +140,7 @@ Examples:
   dev3 remote install-service --port 3017  # (Linux) run as a systemd --user service
   dev3 remote uninstall-service            # (Linux) remove the systemd --user service
   dev3 remote --no-tunnel                  # LAN + SSH only (no public URL)
+  dev3 remote --no-tunnel --host 127.0.0.1 # this machine only (no LAN, no public URL)
   dev3 remote --port 3000                  # fixed port (ideal for Docker -p 3000:3000)
   dev3 remote --expose-ports=3000,5173     # also expose dev-server ports publicly
 `;
@@ -180,6 +189,17 @@ function collectRemoteEnv(args: ParsedArgs): Record<string, string> {
 	const remoteEnv: Record<string, string> = {};
 	if (args.flags["no-tunnel"] === "true") {
 		remoteEnv.DEV3_REMOTE_NO_TUNNEL = "1";
+	}
+	const host = parseHostFlag(args);
+	if (host !== undefined) {
+		remoteEnv.DEV3_REMOTE_HOST = host;
+	} else {
+		// An inherited value reaches the server too, so a typo must not slip past the CLI.
+		const inherited = process.env.DEV3_REMOTE_HOST?.trim();
+		const problem = inherited ? listenHostError(inherited) : null;
+		if (problem) {
+			exitUsage(`DEV3_REMOTE_HOST ${problem}`);
+		}
 	}
 	if (args.flags["views-dir"] && args.flags["views-dir"] !== "true") {
 		remoteEnv.DEV3_VIEWS_DIR = args.flags["views-dir"];
@@ -378,7 +398,7 @@ async function startRemote(args: ParsedArgs): Promise<void> {
 		exitUsage(`Unknown positional argument: "${args.positional[0]}"\nRun "dev3 remote --help" for usage.`);
 	}
 	rejectUnknownFlags(args, [
-		"no-tunnel", "views-dir", "static-code", "port", "expose-ports", "detach", "no-detach", "help", "h",
+		"no-tunnel", "views-dir", "static-code", "port", "host", "expose-ports", "detach", "no-detach", "help", "h",
 	]);
 
 	const remoteEnv = collectRemoteEnv(args); // validates; exits on a bad flag
@@ -800,7 +820,7 @@ export async function printAccessForState(
 	}
 
 	process.stdout.write(`${opts.header}\n\n`);
-	if (opts.withQr) {
+	if (opts.withQr && isScannableAccessUrl(info.url)) {
 		try {
 			const qr = await QRCode.toString(info.url, { type: "terminal", small: true });
 			process.stdout.write(qr + "\n");
