@@ -14,7 +14,8 @@ import { DEV3_HOME } from "../paths";
 import { dev3TempPath } from "../temp-paths";
 import { SHELL_INIT_DIR, writeShellInit } from "../shell-init";
 import { getUserShell } from "../shell-env";
-import { CATPPUCCIN_PLUGIN_DIR, writeCatppuccinPlugin } from "./themes";
+import { CATPPUCCIN_PLUGIN_DIR, PANE_ID_BADGE, writeCatppuccinPlugin } from "./themes";
+import { TMUX_AGENT_PANE_OPTION } from "./constants";
 
 /**
  * Working directory for every spawned tmux CLIENT process (`new-session`,
@@ -44,13 +45,6 @@ export function tmuxClientCwd(): string {
  */
 export const PANE_CWD_FORMAT = "#{?pane_current_path,#{pane_current_path},#{session_path}}";
 
-/**
- * Pane-scoped user option (value "1") marking a pane as an AI-agent pane. The app
- * sets it on every agent pane; the focus hook below reads it to remember which
- * agent pane the user last focused. `pane_current_command` is useless for this —
- * an agent constantly spawns children — so the marker is the reliable signal.
- */
-export const TMUX_AGENT_PANE_OPTION = "@dev3_agent";
 
 /**
  * Session-scoped user option holding the pane id of the last agent pane the user
@@ -254,12 +248,28 @@ function defaultShellConfig(): string[] {
 	}
 }
 
-// Status bar setup — references Catppuccin status modules built by the plugin
+const MULTI_WINDOW = "#{>:#{session_windows},1}";
+const STATUS_BAR_BY_CLIENT_SESSION = `if -F "${MULTI_WINDOW}" "set status on" "set status off"`;
+const HOOK_SESSION = "=#{hook_session_name}:";
+const STATUS_BAR_BY_HOOK_SESSION = String.raw`run -C \"if -F -t '${HOOK_SESSION}' '${MULTI_WINDOW.replaceAll("#", "##")}' 'set -t ${HOOK_SESSION} status on' 'set -t ${HOOK_SESSION} status off'\"`;
+
+// Status bar setup — window tabs, and the focused pane's id on the right
 const TMUX_STATUS_BAR = `
-# Status bar — Catppuccin modules
-set -g status-right-length 100
-set -g status-right "#{E:@catppuccin_status_application}#{E:@catppuccin_status_session}"
+# Status bar — window tabs, focused pane id on the right. On top so the window list sits where the
+# eye starts: a window opened by Cmd+T or an agent must not hide its task.
+set -g status-position top
+set -g status-right "${PANE_ID_BADGE}"
 set -g status-left ""
+
+# Show the bar only while a session has more than one window — a lone window
+# gets its row back. Session-scoped, re-evaluated whenever a window joins or
+# leaves a session and when a client attaches (covers sessions that predate
+# this config). window-(un)linked hooks run outside the session's context, so
+# they target it by #{hook_session_name}; ## defers the count until if-shell.
+set-hook -g window-linked "${STATUS_BAR_BY_HOOK_SESSION}"
+set-hook -g window-unlinked "${STATUS_BAR_BY_HOOK_SESSION}"
+set-hook -g client-attached '${STATUS_BAR_BY_CLIENT_SESSION}'
+set-hook -g client-session-changed '${STATUS_BAR_BY_CLIENT_SESSION}'
 `;
 
 /**

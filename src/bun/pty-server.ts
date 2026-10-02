@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import type { TmuxLayout, TmuxWindowInfo, TmuxPaneInfo } from "../shared/types";
+import { getTaskTitle, type TmuxLayout, type TmuxWindowInfo, type TmuxPaneInfo } from "../shared/types";
 import { ENV_UNSET } from "../shared/agent-accounts";
 import type { TerminalBackendIdentity } from "../shared/terminal-backend-identity";
 import { isResizeSequence, parseResizeSequence, smallestClientSize } from "../shared/resize-protocol";
@@ -49,6 +49,7 @@ import {
 	WINDOW_OVERVIEW_FORMAT,
 	PANE_GEOMETRY_FORMAT,
 	STATUS_GEOMETRY_FORMAT,
+	TMUX_TASK_TITLE_OPTION,
 } from "./tmux";
 
 const log = createLogger("pty");
@@ -1049,33 +1050,64 @@ export async function getTmuxLayout(taskId: string, socket: string = DEFAULT_TMU
 		panes = [];
 	}
 
-	// Status-bar reservation: pane geometry above is the WINDOW (excludes the tmux
-	// status bar), but the rendered canvas includes it. Measure the reserved rows so
-	// the frontend overlay can line up vertically. `client_height - window_height`
-	// is the total reserved rows (robust to multi-line status); fall back to the
-	// `status` option (off → 0, numeric → that many, on → 1) when no client is
-	// attached to read a height from.
-	let statusLines = 0;
-	let statusAtTop = false;
-	try {
-		const status = await tmux.displayMessage(STATUS_GEOMETRY_FORMAT, { target: sessionName, socket });
-		if (status) {
-			statusAtTop = status.statusPosition.trim() === "top";
-			const statusOpt = status.status.trim();
-			if (statusOpt === "off") {
-				statusLines = 0;
-			} else if (status.clientHeight > status.windowHeight) {
-				statusLines = status.clientHeight - status.windowHeight;
-			} else {
-				const n = Number(statusOpt);
-				statusLines = Number.isFinite(n) && n > 0 ? n : 1;
-			}
-		}
-	} catch {
-		// Session vanished mid-read — keep the zero status reservation.
-	}
+	const { statusLines, statusAtTop } = await readTmuxStatusGeometry(sessionName, socket);
 
 	return { sessionName, exists: windows.length > 0, windows, panes, statusLines, statusAtTop };
+}
+
+/**
+ * Status-bar reservation: pane geometry is WINDOW-relative (excludes the tmux
+ * status bar), but the rendered canvas includes it. `client_height -
+ * window_height` is the total reserved rows (robust to multi-line status); fall
+ * back to the `status` option (off → 0, numeric → that many, on → 1) when no
+ * client is attached to read a height from.
+ */
+export async function readTmuxStatusGeometry(
+	sessionName: string,
+	socket: string,
+): Promise<{ statusLines: number; statusAtTop: boolean }> {
+	try {
+		const status = await tmux.displayMessage(STATUS_GEOMETRY_FORMAT, { target: sessionName, socket });
+		if (!status) return { statusLines: 0, statusAtTop: false };
+		const statusAtTop = status.statusPosition.trim() === "top";
+		const statusOpt = status.status.trim();
+		if (statusOpt === "off") return { statusLines: 0, statusAtTop };
+		if (status.clientHeight > status.windowHeight) {
+			return { statusLines: status.clientHeight - status.windowHeight, statusAtTop };
+		}
+		const n = Number(statusOpt);
+		return { statusLines: Number.isFinite(n) && n > 0 ? n : 1, statusAtTop };
+	} catch {
+		// Session vanished mid-read — keep the zero status reservation.
+		return { statusLines: 0, statusAtTop: false };
+	}
+}
+
+/** The task title as a tmux option value: one line, and no `#[` so it cannot restyle the bar. */
+export function tmuxTaskTitleValue(title: string): string {
+	return title.replace(/\s+/g, " ").replaceAll("#[", "# [").trim();
+}
+
+/** Write the task title into the task's tmux session, when dev3 has one open. */
+export async function syncTmuxTaskTitle(taskId: string, title: string): Promise<void> {
+	const session = sessions.get(taskId);
+	if (!session || session.backend !== "tmux" || session.sessionType !== "task") return;
+	await tmux.setOption(`=${session.tmuxSessionName}:`, TMUX_TASK_TITLE_OPTION, tmuxTaskTitleValue(title), {
+		socket: session.tmuxSocket,
+		bestEffort: true,
+	});
+}
+
+/** Seed the title on attach — the session may predate dev3 knowing it (app restart, resume). */
+async function syncTmuxTaskTitleFromBoard(session: PtySession): Promise<void> {
+	try {
+		// Lazy: the board store pulls a large import graph this module must not load eagerly.
+		const data = await import("./data");
+		const task = await data.getTask(await data.getProject(session.projectId), session.taskId);
+		await syncTmuxTaskTitle(session.taskId, getTaskTitle(task));
+	} catch (err) {
+		log.debug("tmux task title sync skipped", { taskId: shortId(session.taskId), error: String(err) });
+	}
 }
 
 /**
@@ -2049,6 +2081,7 @@ function spawnPty(session: PtySession, cols: number, rows: number): void {
 		(async () => {
 			try {
 				await configureTmux(tmuxSessionName, session.tmuxSocket);
+				if (session.sessionType === "task") void syncTmuxTaskTitleFromBoard(session);
 				const sessionSocket = session.tmuxSocket;
 				tmux.setEnvironment(tmuxSessionName, "DEV3_WORKTREE_ROOT", session.cwd, { socket: sessionSocket }).catch(() => {});
 				const envKeys = Object.keys(session.env);
