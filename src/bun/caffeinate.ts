@@ -21,10 +21,15 @@ let detectedBackend: "caffeinate" | "systemd-inhibit" | null = null;
 let detectedBackendPath: string | null = null; // absolute path from `which`
 let consecutiveSpawnFailures = 0;
 
-// After this many consecutive spawn failures, stop retrying for the process
-// lifetime. A broken environment (e.g. posix_spawn ENOENT) otherwise produces
-// an error log + failed fork every 10-second poll cycle, forever.
+// After this many consecutive failures (a spawn that throws, or an inhibit
+// process refused at once), stop retrying for the process lifetime. A broken
+// environment otherwise logs an error + forks every 10-second poll, forever.
 const MAX_SPAWN_FAILURES = 3;
+
+// An inhibit process that exits non-zero this soon after spawning was refused
+// (bad flags, or polkit denying the lock - e.g. WSL, where there is no logind
+// seat). It counts toward MAX_SPAWN_FAILURES like a failed spawn does.
+const QUICK_EXIT_MS = 5000;
 
 // Safety timeout: the inhibit process exits on its own after this period.
 // The 10-second poll cycle restarts it if sessions are still active.
@@ -108,7 +113,7 @@ function buildInhibitCommand(): string[] | null {
 		detectedBackendPath ?? "systemd-inhibit",
 		"--what=sleep",
 		"--who=dev-3.0",
-		"--reason=Agents running",
+		"--why=Agents running",
 		"sleep", String(INHIBIT_TIMEOUT_SECS),
 	];
 }
@@ -124,25 +129,37 @@ function startInhibit(): void {
 	if (!cmd) return;
 
 	try {
-		sleepInhibitProc = spawn(cmd);
-		consecutiveSpawnFailures = 0;
-		log.info("Sleep inhibit started", { backend: detectedBackend, pid: sleepInhibitProc.pid });
+		const proc = spawn(cmd);
+		const startedAt = performance.now(); // monotonic: a clock step must not hide a refusal
+		sleepInhibitProc = proc;
+		log.info("Sleep inhibit started", { backend: detectedBackend, pid: proc.pid });
 
-		// Clean up reference when the process exits (timeout or kill)
-		sleepInhibitProc.exited.then((code) => {
-			log.info("Sleep inhibit exited", { backend: detectedBackend, pid: sleepInhibitProc?.pid, code });
-			sleepInhibitProc = null;
+		proc.exited.then((code) => {
+			log.info("Sleep inhibit exited", { backend: detectedBackend, pid: proc.pid, code });
+			// stopInhibit() drops the reference synchronously and this handler runs
+			// later, so a process that is no longer current was stopped on purpose.
+			const stoppedOnPurpose = sleepInhibitProc !== proc;
+			if (!stoppedOnPurpose) sleepInhibitProc = null;
+			if (performance.now() - startedAt >= QUICK_EXIT_MS) {
+				consecutiveSpawnFailures = 0; // it held the lock, so the backend works
+			} else if (!stoppedOnPurpose && code !== 0) {
+				recordFailure("Sleep inhibit exited immediately", { code });
+			}
 		}).catch(() => {
-			sleepInhibitProc = null;
+			if (sleepInhibitProc === proc) sleepInhibitProc = null;
 		});
 	} catch (err) {
-		consecutiveSpawnFailures++;
-		log.error("Failed to start sleep inhibit", { backend: detectedBackend, error: String(err), attempt: consecutiveSpawnFailures });
 		sleepInhibitProc = null;
-		if (consecutiveSpawnFailures >= MAX_SPAWN_FAILURES) {
-			inhibitAvailable = false;
-			log.error("Sleep inhibit disabled after repeated spawn failures", { backend: detectedBackend });
-		}
+		recordFailure("Failed to start sleep inhibit", { error: String(err) });
+	}
+}
+
+function recordFailure(message: string, detail: Record<string, unknown>): void {
+	consecutiveSpawnFailures++;
+	log.error(message, { backend: detectedBackend, ...detail, attempt: consecutiveSpawnFailures });
+	if (consecutiveSpawnFailures >= MAX_SPAWN_FAILURES) {
+		inhibitAvailable = false;
+		log.error("Sleep inhibit disabled after repeated failures", { backend: detectedBackend });
 	}
 }
 
