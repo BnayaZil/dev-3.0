@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { harnessReadinessFrom, harnessSignIn, type ProbeEnv } from "../harness-readiness";
+import { codexHomeSignedIn, harnessReadinessFrom, harnessSignIn, type ProbeEnv } from "../harness-readiness";
 import type { AgentCheckResult } from "../../shared/types";
 
 /**
@@ -121,5 +121,15 @@ describe("harnessReadinessFrom", () => {
 		const p = probeEnv({ files: { "/home/u/.codex/auth.json": { tokens: {} } } });
 		const report = harnessReadinessFrom([agent("claude"), agent("codex")], p);
 		expect(report.usable).toEqual(["builtin-codex"]);
+	});
+});
+
+describe("codexHomeSignedIn", () => {
+	it("needs a non-empty auth.json in that exact home", () => {
+		const files: Record<string, unknown> = { "/acct/auth.json": { tokens: { id_token: "x" } }, "/empty/auth.json": {} };
+		const readJson = (path: string) => files[path] ?? null;
+		expect(codexHomeSignedIn("/acct", readJson)).toBe(true);
+		expect(codexHomeSignedIn("/empty", readJson)).toBe(false);
+		expect(codexHomeSignedIn("/missing", readJson)).toBe(false);
 	});
 });

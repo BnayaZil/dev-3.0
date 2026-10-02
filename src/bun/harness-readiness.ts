@@ -62,10 +62,19 @@ function anyEnv(p: ProbeEnv, keys: string[]): boolean {
 	return keys.some((key) => (p.env[key] ?? "").trim().length > 0);
 }
 
-/** A non-empty JSON object at `path` — an empty `{}` is a logged-out store. */
-function hasJsonKeys(p: ProbeEnv, path: string): boolean {
-	const value = p.readJson(path);
+/** A non-empty JSON object — an empty `{}` is a logged-out store. */
+function isNonEmptyJsonObject(value: unknown): boolean {
 	return !!value && typeof value === "object" && Object.keys(value as object).length > 0;
+}
+
+function hasJsonKeys(p: ProbeEnv, path: string): boolean {
+	return isNonEmptyJsonObject(p.readJson(path));
+}
+
+/** Whether one Codex home (`~/.codex` or a managed account's `CODEX_HOME`) holds a
+ *  login. The single rule for "is this Codex home signed in" across dev3. */
+export function codexHomeSignedIn(codexHome: string, readJson: (path: string) => unknown = defaultReadJson): boolean {
+	return isNonEmptyJsonObject(readJson(join(codexHome, "auth.json")));
 }
 
 function claudeSignedIn(p: ProbeEnv): boolean {
@@ -81,7 +90,7 @@ function claudeSignedIn(p: ProbeEnv): boolean {
 function codexSignedIn(p: ProbeEnv): boolean {
 	if (anyEnv(p, ["OPENAI_API_KEY"])) return true;
 	const homes = [join(p.home, ".codex"), ...p.codexAccountDirs()];
-	return homes.some((dir) => hasJsonKeys(p, join(dir, "auth.json")));
+	return homes.some((dir) => codexHomeSignedIn(dir, p.readJson));
 }
 
 function geminiSignedIn(p: ProbeEnv): boolean {

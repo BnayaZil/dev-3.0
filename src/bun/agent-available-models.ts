@@ -21,15 +21,15 @@
  * the account's answer.
  */
 
-import { existsSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
 import { getActiveCodexSessionEnv } from "./agent-accounts";
 import { applyBinaryPathOverride } from "./agents";
+import { codexHomeSignedIn } from "./harness-readiness";
 import { loadSettings } from "./settings";
 import { agentKey, getAgentAdapter } from "../shared/agent-adapters/registry";
 import type { ModelListProbeSpec } from "../shared/agent-adapters/types";
 import type { AgentConfiguration, AgentFamily, AgentModelAvailability, CodingAgent } from "../shared/types";
+import { resolveUserHome } from "../shared/user-home";
 import { spawn } from "./spawn";
 
 /** The probe is a fast local-ish call (~300 ms for Codex), but a picker can open
@@ -60,10 +60,13 @@ async function resolveCodexEnv(
 /** Whether the Codex home the probe would read is logged in. A logged-out home
  *  makes `codex debug models` print its bundled catalog, which wrongly looks like
  *  "this account lacks these models" — so an unauthenticated home means unknown. */
-function codexHomeIsAuthenticated(env: Record<string, string> | undefined): boolean {
-	if (env?.OPENAI_API_KEY || process.env.OPENAI_API_KEY) return true;
-	const home = env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), ".codex");
-	return existsSync(join(home, "auth.json"));
+function codexHomeIsAuthenticated(
+	defaultConfig: AgentConfiguration | undefined,
+	env: Record<string, string> | undefined,
+): boolean {
+	if (defaultConfig?.envVars?.OPENAI_API_KEY || process.env.OPENAI_API_KEY) return true;
+	const home = env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(resolveUserHome(), ".codex");
+	return codexHomeSignedIn(home);
 }
 
 async function runProbe(
@@ -126,9 +129,10 @@ export function clearAvailableModelsCache(): void {
  * home is logged out, the probe fails, or it reports an empty catalog (an empty
  * list is never trusted to mean "you have no models"). Routed presets — bound to
  * model roles or the pxpipe proxy — are exempt: their model legitimately need not
- * appear in the account's native catalog. `accountId` selects the account to
- * probe, matching the picker's per-launch account selector; omitted means the
- * registry's active account.
+ * appear in the account's native catalog. So are presets whose
+ * `baseCommandOverride` launches a different binary than the probed one.
+ * `accountId` selects the account to probe, matching the picker's per-launch
+ * account selector; omitted means the registry's active account.
  */
 export async function resolveModelAvailability(
 	agent: CodingAgent,
@@ -148,7 +152,7 @@ export async function resolveModelAvailability(
 
 	const isCodex = agentKey(baseCommand, family) === "codex";
 	const env = isCodex ? await resolveCodexEnv(defaultConfig, opts.accountId) : undefined;
-	if (isCodex && !codexHomeIsAuthenticated(env)) return { status: "unknown" };
+	if (isCodex && !codexHomeIsAuthenticated(defaultConfig, env)) return { status: "unknown" };
 
 	const slugs = await availableSlugs(baseCommand, family, spec, env, opts.refresh ?? false);
 	if (!slugs || slugs.length === 0) return { status: "unknown" };
@@ -160,6 +164,9 @@ export async function resolveModelAvailability(
 	const seen = new Set<string>();
 	for (const config of agentWithPath.configurations) {
 		if (!config.model) continue;
+		// The catalog belongs to the probed binary; a preset launching another
+		// binary is not judged by it.
+		if ((config.baseCommandOverride || agentWithPath.baseCommand) !== baseCommand) continue;
 		if (config.requiresPxpipeProxy) continue;
 		if (config.modelRoles && Object.keys(config.modelRoles).length > 0) continue;
 		if (available.has(normalize(config.model))) continue;
