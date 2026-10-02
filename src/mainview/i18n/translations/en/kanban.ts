@@ -78,7 +78,17 @@ const kanban = {
 	"createTask.taskTypeReview": "PR review",
 	"createTask.taskTypeStandardHint": "No built-in prompt — the description is yours alone.",
 	"createTask.taskTypeCoordinatorHint": "Puts a coordinator brief above your text: manage other tasks, never touch code yourself.",
-	"createTask.taskTypeReviewNeedsBranch": "Pick a branch first — a PR review needs something to review.",
+	"createTask.prLinkLabel": "Pull request",
+	"createTask.prLinkLoad": "Load PR",
+	"createTask.prLinkHint": "Paste a GitHub pull request link — its branch gets checked out for the review. Reviewing a plain branch? Pick it under “Use existing branch”.",
+	"createTask.prLinkMissing": "Paste a pull request link to start the review.",
+	"createTask.prFailGhMissing": "The GitHub CLI (gh) isn't installed. Install it, or pick a branch under “Use existing branch”.",
+	"createTask.prFailGhAuth": "The GitHub CLI (gh) isn't signed in. Run gh auth login, then try again.",
+	"createTask.prFailNoGithubRemote": "This project has no GitHub remote, so its pull requests can't be checked out. Pick a branch under “Use existing branch” instead.",
+	"createTask.prFailForeignRepo": "This pull request is in {prRepo}, but this project is {projectRepo}. Create the review from the {prRepo} project.",
+	"createTask.prFailForkFetch": "Couldn't fetch the branch from the fork — it may have been deleted.",
+	"createTask.prFailNotFound": "No pull request at this link. Check the number and try again.",
+	"createTask.prLinkInvalid": "That isn't a pull request link — it should end in /pull/ and a number.",
 	"createTask.reviewModeHint": "Pre-fills description with a code review prompt",
 
 	// TaskCard

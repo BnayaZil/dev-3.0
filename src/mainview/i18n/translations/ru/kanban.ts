@@ -79,7 +79,17 @@ const kanban = {
 	"createTask.taskTypeReview": "PR ревью",
 	"createTask.taskTypeStandardHint": "Без встроенного промпта — описание только твоё.",
 	"createTask.taskTypeCoordinatorHint": "Ставит над твоим текстом бриф координатора: управляешь другими задачами, сам код не трогаешь.",
-	"createTask.taskTypeReviewNeedsBranch": "Сначала выбери ветку — ревью нечего смотреть.",
+	"createTask.prLinkLabel": "Pull request",
+	"createTask.prLinkLoad": "Загрузить PR",
+	"createTask.prLinkHint": "Вставь ссылку на pull request в GitHub — его ветка будет взята на ревью. Ревьюишь просто ветку? Выбери её в «Использовать существующую ветку».",
+	"createTask.prLinkMissing": "Вставь ссылку на pull request, чтобы начать ревью.",
+	"createTask.prFailGhMissing": "GitHub CLI (gh) не установлен. Поставь его или выбери ветку в «Использовать существующую ветку».",
+	"createTask.prFailGhAuth": "GitHub CLI (gh) не залогинен. Выполни gh auth login и попробуй снова.",
+	"createTask.prFailNoGithubRemote": "У этого проекта нет GitHub-remote, поэтому его pull request не взять. Выбери ветку в «Использовать существующую ветку».",
+	"createTask.prFailForeignRepo": "Этот pull request из {prRepo}, а проект — {projectRepo}. Создай ревью из проекта {prRepo}.",
+	"createTask.prFailForkFetch": "Не удалось скачать ветку из форка — возможно, его удалили.",
+	"createTask.prFailNotFound": "По этой ссылке нет pull request. Проверь номер и попробуй снова.",
+	"createTask.prLinkInvalid": "Это не ссылка на pull request — она должна заканчиваться на /pull/ и номер.",
 	"createTask.reviewModeHint": "Предзаполняет описание промптом для код-ревью",
 
 	// TaskCard

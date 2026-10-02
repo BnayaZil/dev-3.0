@@ -1901,9 +1901,75 @@ describe("CreateTaskModal — task type presets", () => {
 		await waitFor(() => expect(description().value).toBe("Project coordinator."));
 	});
 
-	it("offers PR review only once a branch exists — a review needs something to review", async () => {
+	it("offers PR review without a branch and asks for the pull request link", async () => {
 		renderModal();
-		expect(await screen.findByTestId("task-type-pr-review")).toBeDisabled();
+		await userEvent.type(description(), "Focus on auth.");
+		await userEvent.click(await screen.findByTestId("task-type-pr-review"));
+
+		const link = await screen.findByLabelText("Pull request");
+		await waitFor(() => expect(link).toHaveFocus());
+		expect(screen.getByRole("button", { name: "Save as draft" })).toBeEnabled();
+	});
+
+	it("keeps Save clickable and says what is missing instead of creating a branchless review", async () => {
+		renderModal();
+		await userEvent.type(description(), "Focus on auth.");
+		await userEvent.click(await screen.findByTestId("task-type-pr-review"));
+		const save = screen.getByRole("button", { name: "Save" });
+		expect(save).toBeEnabled();
+
+		await userEvent.click(save);
+
+		expect(await screen.findByText("Paste a pull request link to start the review.")).toBeInTheDocument();
+		expect(screen.getByLabelText("Pull request")).toHaveFocus();
+		expect(screen.getByLabelText("Pull request")).toHaveAttribute("aria-invalid", "true");
+		expect(mockedApi.request.createTask).not.toHaveBeenCalled();
+	});
+
+	it("resolves a pasted PR link into the branch and keeps the review preamble", async () => {
+		mockedApi.request.resolvePrUrl.mockResolvedValue({
+			ok: true, branch: "origin/feature", number: 42, title: "My PR", isFork: false, error: null,
+		});
+		renderModal();
+		await userEvent.type(description(), "Focus on auth.");
+		await userEvent.click(await screen.findByTestId("task-type-pr-review"));
+		await userEvent.click(await screen.findByLabelText("Pull request"));
+		await userEvent.paste("https://github.com/o/r/pull/42");
+
+		await waitFor(() => expect(mockedApi.request.resolvePrUrl).toHaveBeenCalledWith({
+			projectId: "p1", url: "https://github.com/o/r/pull/42",
+		}));
+		expect(await screen.findByText("origin/feature")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Pull request")).not.toBeInTheDocument();
+		expect(description().value).toContain("thorough code review");
+		expect(description().value).toMatch(/\n\n---\n\nFocus on auth\.$/);
+		expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+	});
+
+	it("shows why a PR link failed to resolve, inline", async () => {
+		mockedApi.request.resolvePrUrl.mockResolvedValue({
+			ok: false, branch: null, number: 42, title: null, isFork: false, error: "gh is not logged in", reason: "gh-auth",
+		});
+		renderModal();
+		await userEvent.click(await screen.findByTestId("task-type-pr-review"));
+		await userEvent.type(await screen.findByLabelText("Pull request"), "https://github.com/o/r/pull/42{Enter}");
+
+		expect(await screen.findByRole("alert")).toHaveTextContent("Run gh auth login, then try again.");
+	});
+
+	it("names both repositories when the link belongs to another project", async () => {
+		mockedApi.request.resolvePrUrl.mockResolvedValue({
+			ok: false, branch: null, number: null, title: null, isFork: false,
+			error: "GraphQL: Could not resolve to a Repository with the name 'o/r'.",
+			reason: "foreign-repo", prRepo: "o/r", projectRepo: "h0x91b/dev-3.0",
+		});
+		renderModal();
+		await userEvent.click(await screen.findByTestId("task-type-pr-review"));
+		await userEvent.type(await screen.findByLabelText("Pull request"), "https://github.com/o/r/pull/42{Enter}");
+
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent("This pull request is in o/r, but this project is h0x91b/dev-3.0.");
+		expect(alert).not.toHaveTextContent("GraphQL");
 	});
 
 	it("hides PR review entirely on a virtual project, where no branch can ever exist", async () => {
