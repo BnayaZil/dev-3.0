@@ -2359,8 +2359,10 @@ function App() {
 	// agents can ask at once, and overlapping dialogs would make the user answer
 	// the wrong one. The head of the queue is on screen; the rest wait their turn.
 	useEffect(() => {
+		const resolvedRequestIds = new Set<string>();
 		function onAgentLaunchRequested(e: Event) {
 			const request = (e as CustomEvent).detail as AgentLaunchRequest;
+			if (resolvedRequestIds.has(request.requestId)) return;
 			setLaunchRequests((queue) => (
 				queue.some((r) => r.requestId === request.requestId) ? queue : [...queue, request]
 			));
@@ -2369,23 +2371,35 @@ function App() {
 		// here too, whether it is on screen or still waiting in the queue.
 		function onAgentRequestResolved(e: Event) {
 			const { requestId } = (e as CustomEvent).detail as { requestId: string };
+			resolvedRequestIds.add(requestId);
 			setLaunchRequests((queue) => queue.filter((r) => r.requestId !== requestId));
 		}
+		let cancelled = false;
+		function restoreLaunchRequests() {
+			api.request.getPendingAgentLaunchRequests({}).then((requests) => {
+				if (!cancelled) setLaunchRequests((queue) => [...queue, ...requests.filter((r) => !resolvedRequestIds.has(r.requestId) && !queue.some((q) => q.requestId === r.requestId))]);
+			}).catch(() => {});
+		}
+		window.addEventListener(RPC_STATUS_EVENT, restoreLaunchRequests);
+		restoreLaunchRequests();
 		window.addEventListener("rpc:agentLaunchRequested", onAgentLaunchRequested);
 		window.addEventListener("rpc:agentRequestResolved", onAgentRequestResolved);
 		return () => {
+			cancelled = true;
+			window.removeEventListener(RPC_STATUS_EVENT, restoreLaunchRequests);
 			window.removeEventListener("rpc:agentLaunchRequested", onAgentLaunchRequested);
 			window.removeEventListener("rpc:agentRequestResolved", onAgentRequestResolved);
 		};
 	}, []);
 
 	const respondToLaunchRequest = useCallback((
-		requestId: string,
+		request: AgentLaunchRequest,
 		approved: boolean,
 		launch?: AgentLaunchChoice,
 	) => {
+		const { requestId } = request;
 		setLaunchRequests((queue) => queue.filter((r) => r.requestId !== requestId));
-		if (approved) {
+		if (approved && !request.spawn) {
 			trackEvent("task_moved", { to_status: "in-progress", agent_requested: true });
 			const variantCount = launch?.variants.length ?? 1;
 			if (variantCount > 1) trackEvent("task_spawned", { agent_requested: true, variant_count: variantCount });
@@ -3625,7 +3639,7 @@ function App() {
 				<AgentLaunchRequestModal
 					key={launchRequests[0].requestId}
 					request={launchRequests[0]}
-					onRespond={(approved, launch) => respondToLaunchRequest(launchRequests[0]!.requestId, approved, launch)}
+					onRespond={(approved, launch) => respondToLaunchRequest(launchRequests[0]!, approved, launch)}
 				/>
 			)}
 			{artifactViewer && (

@@ -52,6 +52,37 @@ const GLOBAL_OPTIONS = [
 
 const COMMANDS: CommandHelp[] = [
 	{
+		name: "agent",
+		summary: "Add managed agents to existing task terminals (the CLI equivalent of +Agent).",
+		subcommands: [
+			{
+				name: "list",
+				usage: "dev3 agent list [--json]",
+				summary: "List agent IDs and their configuration/preset IDs.",
+				details: ["Use these exact IDs with agent spawn; --json adds each preset's model and effort."],
+			},
+			{
+				name: "spawn",
+				usage: "dev3 agent spawn [--task <id>] [--project <id>] [--agent <id>] [--config <id>] [--prompt <text>|-] [--handoff] [--json]",
+				summary: "Add one agent pane to a running task, sharing its existing worktree.",
+				details: [
+					"--task <id>     Target task, or the current worktree's task. Supports seq:<N>.",
+					"--agent <id>    Exact agent ID from agent list; omitted = global default.",
+					"--config <id>   Model/effort preset belonging to --agent; omitted = its default.",
+					"Uses the chosen harness's default account; only the user can select another in the approval dialog.",
+					"Preset-defined credentials and provider routing still apply.",
+					"--prompt <text> Initial instructions; - reads stdin, @file reads a file.",
+					"--handoff       Also retell the target task's latest conversation.",
+					"--json          Print pane ID, backend, agent/config IDs and handoff result.",
+					"From a task worktree, asks the user to approve and pick the agent in the app.",
+					"The configured launch auto-approval policy applies; decline exits 10.",
+					"Outside a task worktree, runs directly as a user-initiated launch.",
+					"The target terminal must already be running; no task or worktree is created.",
+				],
+			},
+		],
+	},
+	{
 		name: "current",
 		summary: "Show the current project, task, status, and overview.",
 		subcommands: [],
