@@ -116,6 +116,28 @@ describe.each(["zsh", "bash"] as const)("dev3 %s prompt", (shell) => {
 	});
 });
 
+// dev3's terminal repaints a white *background* dark (ansi-theme-adapt.ts), so a
+// segment edge drawn on one turns into a dark notch — the timer's, once.
+describe("dev3 zsh prompt colours", () => {
+	it.skipIf(!hasShell("zsh"))("never asks for a white background, timer segment included", () => {
+		writeShellInit({});
+		const worktree = dirtyWorktree();
+		const out = spawnSync(
+			"zsh",
+			["-f", "-c", `source ${SHELL_INIT_DIR}/.zshrc; COLUMNS=200; _dev3_t0=$(( EPOCHREALTIME - 3 )); _dev3_precmd; print -P -- "$PROMPT"`],
+			{
+				cwd: join(worktree, "src/bun"),
+				env: { PATH: process.env.PATH, HOME: worktree, LANG: "en_US.UTF-8", DEV3_WORKTREE_ROOT: worktree, DEV3_TASK_SEQ: "42" },
+				encoding: "utf8",
+			},
+		);
+		expect(out.stdout.replace(SGR, "")).toContain("3s");
+		const params = [...out.stdout.matchAll(new RegExp(`${ESC}\\[([0-9;]*)m`, "g"))].flatMap((m) => m[1].split(";"));
+		expect(params).not.toContain("47");
+		expect(params).not.toContain("107");
+	});
+});
+
 describe("dev3 prompt style choice", () => {
 	const zsh = hasShell("zsh");
 	const zshrc = () => readFileSync(`${SHELL_INIT_DIR}/.zshrc`, "utf8");
@@ -168,7 +190,7 @@ describe("dev3 prompt style choice", () => {
 					PATH: process.env.PATH,
 					HOME: worktree,
 					LANG: "en_US.UTF-8",
-					COLUMNS: "72",
+					DEV3_PREVIEW_COLUMNS: "72",
 					DEV3_WORKTREE_ROOT: worktree,
 					DEV3_TASK_SEQ: "42",
 					DEV3_PREVIEW_ENGINE: engine,
@@ -184,6 +206,30 @@ describe("dev3 prompt style choice", () => {
 			expect(slow.trim().length, style.id).toBeGreaterThan(0);
 			expect(failed, style.id).not.toContain("dev3_");
 		}
+	});
+
+	it.skipIf(!zsh)("previews at the width it was asked for, not the width zsh inherited", () => {
+		const worktree = dirtyWorktree();
+		const engine = join(worktree, ".git", "engine.zsh");
+		writeFileSync(engine, ZSH_PROMPT_ENGINE);
+		const out = spawnSync("zsh", ["-f", "-c", PREVIEW_RENDER_SCRIPT], {
+			cwd: join(worktree, "src/bun"),
+			env: {
+				PATH: process.env.PATH,
+				HOME: worktree,
+				LANG: "en_US.UTF-8",
+				COLUMNS: "19",
+				DEV3_PREVIEW_COLUMNS: "72",
+				DEV3_WORKTREE_ROOT: worktree,
+				DEV3_TASK_SEQ: "42",
+				DEV3_PREVIEW_ENGINE: engine,
+				DEV3_PREVIEW_STYLE: SHELL_PROMPT_STYLES[0].source,
+			},
+			encoding: "utf8",
+		});
+		const preview = parsePreviewOutput(out.stdout, 72);
+		if (!preview.ok) throw new Error(out.stderr);
+		expect(preview.afterSlowCommand[0].replace(SGR, "")).toContain("#42");
 	});
 
 	it.skipIf(!zsh)("every built-in style parses", () => {
