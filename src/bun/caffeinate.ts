@@ -1,9 +1,9 @@
 /**
  * Sleep prevention for macOS (`caffeinate`) and Linux (`systemd-inhibit`).
  *
- * When enabled in global settings and at least one agent tmux session is active,
- * spawns the appropriate platform command to prevent the system from sleeping.
- * When all sessions end (or the setting is toggled off), the process is killed.
+ * While the setting is enabled (or remote access is active) it keeps the
+ * platform command running for the whole time the app runs, agents busy or
+ * idle. Toggling the setting off kills the process.
  *
  * Both tools are optional dependencies — if not found on PATH, the feature
  * defaults to off and the settings UI shows a hint.
@@ -36,6 +36,12 @@ const QUICK_EXIT_MS = 5000;
 // This prevents the process from running forever if the app crashes
 // or the poll loop breaks.
 const INHIBIT_TIMEOUT_SECS = 3600; // 1 hour
+
+// The successor is spawned this long before the safety timeout fires, and only
+// then is the old process killed. Letting it simply expire leaves a gap until
+// the next poll, and an idle machine sleeps in that same second.
+const RENEW_BEFORE_EXPIRY_MS = 5 * 60_000;
+let renewTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Detect which sleep inhibit backend is available.
@@ -101,11 +107,12 @@ function buildInhibitCommand(): string[] | null {
 	if (!backend) return null;
 
 	if (backend === "caffeinate") {
-		// -s: prevent system sleep (allows display sleep)
+		// -i: prevent idle sleep, on battery too; -s: prevent system sleep, AC only.
+		// Neither keeps the display on.
 		// -t: auto-exit after timeout
 		// Use the absolute path resolved by `which` — spawning the bare name
 		// intermittently failed with posix_spawn ENOENT (PATH drift at runtime).
-		return [detectedBackendPath ?? "caffeinate", "-s", "-t", String(INHIBIT_TIMEOUT_SECS)];
+		return [detectedBackendPath ?? "caffeinate", "-i", "-s", "-t", String(INHIBIT_TIMEOUT_SECS)];
 	}
 
 	// systemd-inhibit wraps a command; we use `sleep` as the payload
@@ -133,6 +140,7 @@ function startInhibit(): void {
 		const startedAt = performance.now(); // monotonic: a clock step must not hide a refusal
 		sleepInhibitProc = proc;
 		log.info("Sleep inhibit started", { backend: detectedBackend, pid: proc.pid });
+		armRenewal(proc);
 
 		proc.exited.then((code) => {
 			log.info("Sleep inhibit exited", { backend: detectedBackend, pid: proc.pid, code });
@@ -154,6 +162,29 @@ function startInhibit(): void {
 	}
 }
 
+function armRenewal(proc: ReturnType<typeof spawn>): void {
+	if (renewTimer) clearTimeout(renewTimer);
+	renewTimer = setTimeout(() => handOver(proc), INHIBIT_TIMEOUT_SECS * 1000 - RENEW_BEFORE_EXPIRY_MS);
+}
+
+/** Replace a still-current inhibit process with a fresh one, overlapping the two. */
+function handOver(previous: ReturnType<typeof spawn>): void {
+	renewTimer = null;
+	if (sleepInhibitProc !== previous) return;
+	sleepInhibitProc = null;
+	startInhibit();
+	if (!sleepInhibitProc) {
+		// The successor failed to start: keep the old one until its own timeout.
+		sleepInhibitProc = previous;
+		return;
+	}
+	try {
+		previous.kill();
+	} catch (err) {
+		log.warn("Failed to kill the replaced sleep inhibit", { backend: detectedBackend, error: String(err) });
+	}
+}
+
 function recordFailure(message: string, detail: Record<string, unknown>): void {
 	consecutiveSpawnFailures++;
 	log.error(message, { backend: detectedBackend, ...detail, attempt: consecutiveSpawnFailures });
@@ -167,6 +198,10 @@ function recordFailure(message: string, detail: Record<string, unknown>): void {
  * Stop the sleep inhibit process if running.
  */
 function stopInhibit(): void {
+	if (renewTimer) {
+		clearTimeout(renewTimer);
+		renewTimer = null;
+	}
 	if (!sleepInhibitProc) return;
 	try {
 		log.info("Stopping sleep inhibit", { backend: detectedBackend, pid: sleepInhibitProc.pid });
