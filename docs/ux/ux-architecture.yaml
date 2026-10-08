@@ -185,12 +185,12 @@ ux_architecture:
       max_visible_tabs: 6
       status: "observed"
     command_palette:
-      purpose: "Keyboard-summoned palette with two modes (see surfaces.command_palette). Navigation (Cmd/Ctrl+Shift+K) complements index jumps (Cmd+1..9) and the breadcrumb dropdown; actions (Cmd/Ctrl+Shift+P) complement the native menu when you'd rather type than hunt."
-      mechanism: "Cmd/Ctrl+Shift+K = navigation (fuzzy-jump to a project, Enter navigates). Cmd/Ctrl+Shift+P = actions (fuzzy-match a command label, Enter runs it via handleMenuAction). Both fuzzy via utils/fuzzyMatch.ts on the shared PaletteShell."
+      purpose: "Keyboard palette. Navigation is a 3-mode 'Go to' palette (Cmd/Ctrl+Shift+K/J/L = projects/tasks/combined; Tab or the tap-reachable strip switches), complementing Cmd+1..9 and the breadcrumb; actions (Cmd/Ctrl+Shift+P) complement the native menu."
+      mechanism: "One GoToPalette: projects fuzzy-match (utils/fuzzyMatch.ts); tasks reuse the token-DSL matcher (utils/taskSearch.ts, NOT the funnel) ordered most-recently-viewed first (utils/recentTasks.ts). Actions run via handleMenuAction. Shared PaletteShell."
       allowed: ["destination", "object_jump", "command_runner"]
-      forbidden: ["destructive_action", "durable_state_without_friction"]
+      forbidden: ["destructive_action", "durable_state_without_friction", "dense_filters"]
       status: "observed"
-      evidence: ["src/mainview/components/ProjectQuickSwitchModal.tsx", "src/mainview/components/CommandPaletteModal.tsx", "src/mainview/App.tsx (Cmd+Shift+K + Cmd+Shift+P)"]
+      evidence: ["src/mainview/components/GoToPalette.tsx", "src/mainview/components/CommandPaletteModal.tsx", "src/mainview/App.tsx (go-to-* + Cmd+Shift+P)"]
 
   surfaces:
     diagnostics:

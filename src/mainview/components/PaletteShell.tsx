@@ -43,13 +43,26 @@ interface PaletteShellProps<T> {
 	renderItemRight?: (item: T, index: number, query: string) => React.ReactNode;
 	/** Extra classes for a row's label — used to blur a masked (sensitive) row. */
 	getTextClassName?: (item: T) => string;
+	/** Optional content above the input (e.g. a mode switcher strip). */
+	header?: React.ReactNode;
+	/** Controlled query. When omitted, the shell owns the query internally. */
+	query?: string;
+	onQueryChange?: (query: string) => void;
+	/**
+	 * Override the default `fuzzyRank` filtering/ordering (e.g. a token-DSL
+	 * matcher). Must return the surviving items with the indices to highlight in
+	 * `getText`. When omitted, the shell fuzzy-ranks on `getSearchText ?? getText`.
+	 */
+	filterRank?: (query: string, items: T[]) => { item: T; indices: number[] }[];
+	/** Called on Tab / Shift+Tab (dir +1 / -1). Enables an in-palette mode switch. */
+	onTab?: (dir: 1 | -1) => void;
 }
 
 /**
  * Shared command-palette overlay: portal, click-outside, fuzzy-filtered list,
- * keyboard navigation (↑/↓ wrap, Enter commits, Esc closes), and matched-char
- * highlighting. Both the Cmd+Shift+K navigation palette (ProjectQuickSwitchModal) and
- * the Cmd+Shift+P action palette (CommandPaletteModal) render on top of it.
+ * keyboard navigation (↑/↓ wrap, Enter commits, Esc closes, optional Tab mode
+ * switch), and matched-char highlighting. The ⇧⌘K/J/L navigation palette
+ * (GoToPalette) and the ⇧⌘P action palette (CommandPaletteModal) render on top of it.
  */
 export function PaletteShell<T>({
 	items,
@@ -65,14 +78,24 @@ export function PaletteShell<T>({
 	testId,
 	renderItemRight,
 	getTextClassName,
+	header,
+	query: controlledQuery,
+	onQueryChange,
+	filterRank,
+	onTab,
 }: PaletteShellProps<T>) {
-	const [query, setQuery] = useState("");
+	const [innerQuery, setInnerQuery] = useState("");
+	const query = controlledQuery ?? innerQuery;
+	const setQuery = onQueryChange ?? setInnerQuery;
 	const [index, setIndex] = useState(0);
 	const trapRef = useFocusTrap<HTMLDivElement>();
 
 	const results = useMemo(
-		() => fuzzyRank(query, items, getSearchText ?? getText),
-		[query, items, getText, getSearchText],
+		() =>
+			filterRank
+				? filterRank(query, items)
+				: fuzzyRank(query, items, getSearchText ?? getText).map((r) => ({ item: r.item, indices: r.indices })),
+		[filterRank, query, items, getText, getSearchText],
 	);
 
 	// Keep the selection within bounds whenever the result set shrinks/grows.
@@ -97,6 +120,11 @@ export function PaletteShell<T>({
 		} else if (e.key === "Enter") {
 			e.preventDefault();
 			commit(selected);
+		} else if (e.key === "Tab" && onTab) {
+			// Owns Tab before the focus trap would move focus — it is the mode switch.
+			e.preventDefault();
+			e.stopPropagation();
+			onTab(e.shiftKey ? -1 : 1);
 		}
 	}
 
@@ -117,6 +145,7 @@ export function PaletteShell<T>({
 				aria-label={ariaLabel}
 			>
 				<div className="px-3 pt-3 pb-2 border-b border-edge">
+					{header}
 					{/* biome-ignore lint/a11y/noAutofocus: command palette is opened on demand by a shortcut */}
 					<input
 						autoFocus

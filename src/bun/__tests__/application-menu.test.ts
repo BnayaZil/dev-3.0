@@ -63,21 +63,18 @@ describe("buildApplicationMenu", () => {
 		const viewMenu = findLabeledMenu(menu, "View");
 		const submenu = viewMenu?.submenu ?? [];
 
-		// First two actionable items are the palettes, ahead of Show Dashboard.
+		// The four palette openers lead View, ahead of Show Dashboard: the three
+		// "Go to" modes then the command palette.
 		const actionable = submenu.filter((item) => item.action);
-		expect(actionable[0]).toMatchObject({
-			label: "Go to Project… (⇧⌘K)",
-			action: MENU_ACTIONS.openProjectSwitch,
-			enabled: true,
-		});
-		expect(actionable[1]).toMatchObject({
-			label: "Command Palette… (⇧⌘P)",
-			action: MENU_ACTIONS.openCommandPalette,
-			enabled: true,
-		});
+		expect(actionable[0]).toMatchObject({ label: "Go to Project… (⇧⌘K)", action: MENU_ACTIONS.openProjectSwitch, enabled: true });
+		expect(actionable[1]).toMatchObject({ label: "Go to Task… (⇧⌘J)", action: MENU_ACTIONS.openTaskSwitch, enabled: true });
+		expect(actionable[2]).toMatchObject({ label: "Go to Anything… (⇧⌘L)", action: MENU_ACTIONS.openCombinedSwitch, enabled: true });
+		expect(actionable[3]).toMatchObject({ label: "Command Palette… (⇧⌘P)", action: MENU_ACTIONS.openCommandPalette, enabled: true });
 		// Chords / toggles are owned by the renderer — no native accelerator.
 		expect(actionable[0].accelerator).toBeUndefined();
 		expect(actionable[1].accelerator).toBeUndefined();
+		expect(actionable[2].accelerator).toBeUndefined();
+		expect(actionable[3].accelerator).toBeUndefined();
 	});
 
 	it("leaves Ctrl+- available for route history instead of native zoom-out", () => {

@@ -83,10 +83,12 @@ import { taskDialogInfoFromSubject } from "./utils/taskDialogInfo";
 import { unsavedWorkWarning } from "./utils/confirmTaskCompletion";
 import { createAgentRequestAbort } from "./utils/agentRequestAbort";
 import { getRecentProjectIds, orderByRecency, recordProjectJump } from "./utils/recentProjects";
+import { recordTaskVisit } from "./utils/recentTasks";
+import { navKey, recordNavVisit } from "./utils/recentNav";
 import type { NavigationGuard } from "./navigation-guard";
 import { useTaskSwitcher } from "./hooks/useTaskSwitcher";
 import TaskSwitcherOverlay from "./components/TaskSwitcherOverlay";
-import ProjectQuickSwitchModal from "./components/ProjectQuickSwitchModal";
+import GoToPalette, { type GoToMode } from "./components/GoToPalette";
 import CommandPaletteModal from "./components/CommandPaletteModal";
 import CoordinatorFinderModal from "./components/CoordinatorFinderModal";
 import OpenInPickerModal from "./components/OpenInPickerModal";
@@ -125,7 +127,12 @@ const TERMINAL_PERF_KEY = "dev3-terminal-perf";
 /** Unanswered quit dialog auto-confirms after this long — sessions survive in tmux either way. */
 const QUIT_AUTO_CONFIRM_SECONDS = 10;
 
-type NavPalette = "project" | "command" | "coordinator";
+type NavPalette = GoToMode | "command" | "coordinator";
+
+/** The three "Go to" palette modes share one surface (GoToPalette). */
+function isGoToMode(p: NavPalette | null): p is GoToMode {
+	return p === "project" || p === "task" || p === "combined";
+}
 
 type RemoteAccessQRData = {
 	qrDataUrl: string;
@@ -810,6 +817,23 @@ function App() {
 		setHintMode(false);
 	}, [state.route]);
 
+	// Record a task VISIT for the "Go to" palette's recency the moment the route
+	// lands on a task — any way it got there (a card, the switcher, a deep link,
+	// back/forward, restore). This is why a task floats to the top on being VIEWED,
+	// not only when picked from the palette (the persisted mirror of `taskMru`).
+	useEffect(() => {
+		const taskId = routeTaskId(state.route);
+		if (taskId) {
+			recordTaskVisit(taskId);
+			// A task view records the TASK on the unified timeline (its project row
+			// stays separate), so Combined mode can interleave the two by visit time.
+			recordNavVisit(navKey("task", taskId));
+		} else {
+			const projectId = projectIdForRoute(state.route);
+			if (projectId) recordNavVisit(navKey("project", projectId));
+		}
+	}, [state.route]);
+
 	// Single chokepoint for committing a navigation. Records a project "jump"
 	// for the Cmd+Shift+K recency list whenever the destination route lands on a
 	// project, so every entry point (Dashboard click, Cmd+1..9, Cmd+Shift+1..9,
@@ -1133,9 +1157,10 @@ function App() {
 			shortcutIndexById[p.id] = i;
 		});
 		// Pin the builtin Operations board first (consistent with the dashboard,
-		// header switcher, and sidebar), then recency, then board order.
+		// header switcher, and sidebar), then recency, then board order. Any "Go to"
+		// mode (project/task/combined) gets the recency ordering.
 		const ordered = orderProjectsForDisplay(
-			navPalette === "project" ? orderByRecency(boardProjects, getRecentProjectIds()) : boardProjects,
+			isGoToMode(navPalette) ? orderByRecency(boardProjects, getRecentProjectIds()) : boardProjects,
 		);
 		return { projects: ordered, shortcutIndexById };
 	}, [state.projects, navPalette]);
@@ -1214,6 +1239,8 @@ function App() {
 		// The View-menu palette items open (not toggle) the palettes — the
 		// Cmd+Shift+K / Cmd+Shift+P keydown handlers below own the toggle behavior.
 		const onProjectSwitch = () => setNavPalette("project");
+		const onTaskSwitch = () => setNavPalette("task");
+		const onCombinedSwitch = () => setNavPalette("combined");
 		const onCommandPalette = () => setNavPalette("command");
 		const onCoordinatorFinder = () => setNavPalette("coordinator");
 		const onImportConversations = (e: Event) => {
@@ -1225,6 +1252,8 @@ function App() {
 		window.addEventListener("menu:open-new-task", onNewTask);
 		window.addEventListener("menu:open-add-project", onAddProject);
 		window.addEventListener("menu:open-project-switch", onProjectSwitch);
+		window.addEventListener("menu:open-task-switch", onTaskSwitch);
+		window.addEventListener("menu:open-combined-switch", onCombinedSwitch);
 		window.addEventListener("menu:open-command-palette", onCommandPalette);
 		window.addEventListener("menu:open-coordinator-finder", onCoordinatorFinder);
 		return () => {
@@ -1232,6 +1261,8 @@ function App() {
 			window.removeEventListener("menu:open-new-task", onNewTask);
 			window.removeEventListener("menu:open-add-project", onAddProject);
 			window.removeEventListener("menu:open-project-switch", onProjectSwitch);
+			window.removeEventListener("menu:open-task-switch", onTaskSwitch);
+			window.removeEventListener("menu:open-combined-switch", onCombinedSwitch);
 			window.removeEventListener("menu:open-command-palette", onCommandPalette);
 			window.removeEventListener("menu:open-coordinator-finder", onCoordinatorFinder);
 		};
@@ -1375,6 +1406,18 @@ function App() {
 				e.stopPropagation();
 				if (showQuitDialog || createTaskProjectId || showAddProjectModal) return;
 				toggleNavPalette("project");
+			} else if (matchesShortcut(e, "go-to-task")) {
+				// Same "Go to" palette, opened on the Tasks mode (recent-first, token-DSL).
+				e.preventDefault();
+				e.stopPropagation();
+				if (showQuitDialog || createTaskProjectId || showAddProjectModal) return;
+				toggleNavPalette("task");
+			} else if (matchesShortcut(e, "go-to-combined")) {
+				// Same "Go to" palette, opened on the Combined (projects + tasks) mode.
+				e.preventDefault();
+				e.stopPropagation();
+				if (showQuitDialog || createTaskProjectId || showAddProjectModal) return;
+				toggleNavPalette("combined");
 			} else if (matchesShortcut(e, "command-palette")) {
 				// The action (command) palette (VSCode convention). The navigation
 				// sibling is `go-to-project`.
@@ -3094,19 +3137,27 @@ function App() {
 					onExit={(completed) => finishTour(activeTour.id, completed)}
 				/>
 			)}
-			{navPalette === "project" && (
-				<ProjectQuickSwitchModal
+			{isGoToMode(navPalette) && (
+				<GoToPalette
+					mode={navPalette}
+					onModeChange={(m) => setNavPalette(m)}
 					projects={quickSwitch.projects}
 					shortcutIndexById={quickSwitch.shortcutIndexById}
-					onSelect={(projectId) => {
-						closeNavPalette("project");
+					projectById={switcherProjectById}
+					taskPorts={state.taskPorts}
+					onSelectProject={(projectId) => {
+						setNavPalette(null);
 						navigateToProject(projectId);
 					}}
 					onSelectSpace={(spaceId) => {
-						closeNavPalette("project");
+						setNavPalette(null);
 						navigateToSpace(spaceId);
 					}}
-					onClose={() => closeNavPalette("project")}
+					onSelectTask={(task) => {
+						setNavPalette(null);
+						navigate(taskOpenRoute(task.id, task.projectId, getTaskOpenMode(), false));
+					}}
+					onClose={() => setNavPalette(null)}
 				/>
 			)}
 			{openInPicker && (

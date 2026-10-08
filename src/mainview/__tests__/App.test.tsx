@@ -4316,13 +4316,13 @@ describe("App navigation palettes are mutually exclusive", () => {
 	const goToProject = () => userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
 	const commandPalette = () => userEvent.keyboard("{Meta>}{Shift>}p{/Shift}{/Meta}");
 	const openPalettes = () =>
-		["project-quick-switch", "command-palette", "coordinator-finder"].filter((id) => screen.queryByTestId(id));
+		["go-to-palette", "command-palette", "coordinator-finder"].filter((id) => screen.queryByTestId(id));
 	const paletteInput = (testId: string) => within(screen.getByTestId(testId)).getByRole("textbox");
 
 	it("⇧⌘P replaces an open Go to Project palette instead of stacking on it", async () => {
 		await renderApp();
 		await goToProject();
-		expect(openPalettes()).toEqual(["project-quick-switch"]);
+		expect(openPalettes()).toEqual(["go-to-palette"]);
 
 		await commandPalette();
 		expect(openPalettes()).toEqual(["command-palette"]);
@@ -4333,8 +4333,8 @@ describe("App navigation palettes are mutually exclusive", () => {
 		await renderApp();
 		await commandPalette();
 		await goToProject();
-		expect(openPalettes()).toEqual(["project-quick-switch"]);
-		expect(document.activeElement).toBe(paletteInput("project-quick-switch"));
+		expect(openPalettes()).toEqual(["go-to-palette"]);
+		expect(document.activeElement).toBe(paletteInput("go-to-palette"));
 	});
 
 	it("pressing the same palette shortcut again still closes it", async () => {

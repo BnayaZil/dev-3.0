@@ -55,6 +55,11 @@ export const ALL_COMMANDS: PaletteCommand[] = [
 	{ id: "view-dashboard", labelKey: "command.viewDashboard", category: "nav", scope: "always" },
 	{ id: "view-kanban", labelKey: "command.viewKanban", category: "nav", scope: "project" },
 	{ id: "find-coordinator", labelKey: "command.findCoordinator", category: "nav", scope: "always" },
+	// The "Go to" palette's task / combined modes (projects mode keeps its own
+	// ⇧⌘K + View-menu entry). Ids are the menu-action strings the native View
+	// items also use, so one menuRouter case serves both entry points.
+	{ id: "open-task-switch", labelKey: "command.goToTask", category: "nav", scope: "always" },
+	{ id: "open-combined-switch", labelKey: "command.goToCombined", category: "nav", scope: "always" },
 	{ id: "view-changelog", labelKey: "command.viewChangelog", category: "nav", scope: "always" },
 	{ id: "view-stats", labelKey: "command.openStats", category: "nav", scope: "always" },
 	{ id: "open-settings", labelKey: "command.openSettings", category: "nav", scope: "always" },

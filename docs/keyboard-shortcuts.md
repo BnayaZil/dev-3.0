@@ -15,6 +15,8 @@ this page and the website all read from it.
 | Action | macOS | Linux |
 |---|---|---|
 | Go to project (quick switch) | ⇧⌘K | Ctrl+Shift+K |
+| Go to task (quick switch) | ⇧⌘J | Ctrl+Shift+J |
+| Go to anything — projects + tasks | ⇧⌘L | Ctrl+Shift+L |
 | Zoom out to the space board | ⇧⌘U | Ctrl+Shift+U |
 | Command palette | ⇧⌘P / ⇧⌘Space | Ctrl+Shift+P / Ctrl+Shift+Space |
 | Keyboard shortcuts panel | ⌘/ | Ctrl+/ |

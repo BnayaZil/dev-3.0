@@ -205,6 +205,12 @@ export async function handleMenuAction(action: string, ctx: RouterCtx): Promise<
 		case "open-project-switch":
 			window.dispatchEvent(new CustomEvent("menu:open-project-switch"));
 			return;
+		case "open-task-switch":
+			window.dispatchEvent(new CustomEvent("menu:open-task-switch"));
+			return;
+		case "open-combined-switch":
+			window.dispatchEvent(new CustomEvent("menu:open-combined-switch"));
+			return;
 		case "open-command-palette":
 			window.dispatchEvent(new CustomEvent("menu:open-command-palette"));
 			return;
@@ -480,7 +486,7 @@ export const BROWSER_HANDLED_ACTIONS: ReadonlySet<string> = new Set<string>([
 	"go-back", "go-forward", "gauge-demo", "viewport-lab", "native-pane-layout-lab", "update-popover-preview", "feature-flags",
 	"terminal-perf-overlay",
 	"debug-play-sound-completed", "debug-play-sound-cancelled", "debug-push-sound-completed",
-	"open-new-task", "open-add-project", "open-project-switch", "open-command-palette", "find-coordinator",
+	"open-new-task", "open-add-project", "open-project-switch", "open-task-switch", "open-combined-switch", "open-command-palette", "find-coordinator",
 	// Project
 	"project-settings", "project-import-conversations", "project-pull-main", "project-create-pr",
 	"project-dev-server-start", "project-dev-server-stop", "project-dev-server-restart", "project-dev-server-status",

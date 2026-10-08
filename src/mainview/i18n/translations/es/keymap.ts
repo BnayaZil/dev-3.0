@@ -15,6 +15,8 @@ const keymap = {
 	"keymap.category.app": "Aplicación",
 
 	"keymap.shortcut.goToProject": "Ir al proyecto (cambio rápido)",
+	"keymap.shortcut.goToTask": "Ir a la tarea (cambio rápido)",
+	"keymap.shortcut.goToCombined": "Ir a cualquier cosa (proyectos + tareas)",
 	"keymap.shortcut.commandPalette": "Paleta de comandos",
 	"keymap.shortcut.back": "Atrás",
 	"keymap.shortcut.forward": "Adelante",

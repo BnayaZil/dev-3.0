@@ -74,6 +74,8 @@ export const MENU_ACTIONS = {
 
 	// ── View ──
 	openProjectSwitch: "open-project-switch",
+	openTaskSwitch: "open-task-switch",
+	openCombinedSwitch: "open-combined-switch",
 	openCommandPalette: "open-command-palette",
 	viewDashboard: "view-dashboard",
 	viewKanban: "view-kanban",
@@ -675,6 +677,8 @@ function viewMenu(): ApplicationMenuItemConfig {
 			// toggle — so we add no native accelerator and show the chord in the
 			// label instead. Clicking opens the palette via menuRouter.
 			item({ label: "Go to Project… (⇧⌘K)", action: MENU_ACTIONS.openProjectSwitch }),
+			item({ label: "Go to Task… (⇧⌘J)", action: MENU_ACTIONS.openTaskSwitch }),
+			item({ label: "Go to Anything… (⇧⌘L)", action: MENU_ACTIONS.openCombinedSwitch }),
 			item({ label: "Command Palette… (⇧⌘P)", action: MENU_ACTIONS.openCommandPalette }),
 			SEP,
 			item({ label: "Show Dashboard", action: MENU_ACTIONS.viewDashboard }),

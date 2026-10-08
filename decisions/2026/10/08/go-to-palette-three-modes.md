@@ -1,0 +1,16 @@
+# "Go to" palette — three modes on one shell, matcher reused, recency on view
+
+## Context
+The ⇧⌘K navigation palette only jumped to projects. The bible already reserved the next step ("Future: Cmd+K absorbs task search too", §5) and named the palette as the home for cross-project task search (§9a). This realizes it as a single palette with three modes — Projects, Tasks, Combined — rather than three separate surfaces.
+
+## Investigation
+A reusable, pure token-search engine already existed (`utils/taskSearch.ts` + `utils/taskFacets.ts`), shared by the sidebar and the Kanban board; only the per-task `FacetResolver` construction was duplicated inline. Task recency already existed in-memory as `state.taskMru` (bumped on every navigation that lands on a task), but reset on reload, unlike the project MRU which persists to localStorage.
+
+## Decision
+One component, `components/GoToPalette.tsx`, renders all three modes on the existing `PaletteShell` (extended with optional `header`, controlled `query`, a `filterRank` override, and `onTab`). `ProjectQuickSwitchModal` is deleted and its sole caller rewritten (no duplicate project palette). Each mode has a shortcut (`go-to-project` ⇧⌘K, `go-to-task` ⇧⌘J, `go-to-combined` ⇧⌘L in `keymap.ts`); Tab cycles modes, and the mode strip is a tap target so touch (no Tab, no native menu in remote) can switch too. Task mode reuses the DSL **matcher** (`matchesTaskQuery`) but never the filter-funnel chrome — the palette's "no dense filters" rule. The duplicated resolver is extracted to `utils/facetResolver.ts` (`buildFacetResolver`) and the sidebar repointed at it. A persisted `utils/recentTasks.ts` (localStorage `dev3-recent-tasks-v1`) mirrors the project MRU and is written from a new `App.tsx` route-change effect, so a task floats to the top on being VIEWED, from anywhere, surviving reload.
+
+## Risks
+Stale recent-task ids (completed/deleted) are dropped on read. The Kanban board still builds its resolver inline (deliberately left — its board-scoped construction differs); only the sidebar was repointed. Combined mode runs two matchers (DSL for tasks, fuzzy for projects); a task-only token (`label:` …) therefore excludes all projects, which is the intended, predictable behavior.
+
+## Alternatives considered
+Three separate palettes (rejected: triples the chrome for one "go somewhere" job). Pulling the sidebar's FilterFunnel into the palette (rejected: violates the palette's no-dense-filters rule and its keyboard-only, no-chrome identity). A `lastVisited` field on the `Task` type / `tasks.json` (rejected: heavyweight RPC-backed state for a per-viewer UI convenience — localStorage is the established pattern).
