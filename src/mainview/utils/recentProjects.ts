@@ -9,10 +9,10 @@
 const LS_KEY = "dev3-recent-projects-v1";
 const MAX_ENTRIES = 16;
 
-/** Read the MRU project-id list, most-recent first. Tolerates corrupt storage. */
-export function getRecentProjectIds(): string[] {
+/** Read a persisted MRU id list, most-recent first. Tolerates corrupt storage. */
+export function readMruList(storageKey: string): string[] {
 	try {
-		const raw = localStorage.getItem(LS_KEY);
+		const raw = localStorage.getItem(storageKey);
 		if (!raw) return [];
 		const parsed = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return [];
@@ -22,15 +22,25 @@ export function getRecentProjectIds(): string[] {
 	}
 }
 
-/** Record a jump to `projectId`, moving it to the front of the MRU list. */
-export function recordProjectJump(projectId: string): void {
-	if (!projectId) return;
-	const next = [projectId, ...getRecentProjectIds().filter((id) => id !== projectId)].slice(0, MAX_ENTRIES);
+/** Move `id` to the front of a persisted MRU list, capped at `max` entries. */
+export function pushMruEntry(storageKey: string, id: string, max: number): void {
+	if (!id) return;
+	const next = [id, ...readMruList(storageKey).filter((x) => x !== id)].slice(0, max);
 	try {
-		localStorage.setItem(LS_KEY, JSON.stringify(next));
+		localStorage.setItem(storageKey, JSON.stringify(next));
 	} catch {
 		/* ignore — recency is best-effort */
 	}
+}
+
+/** Read the MRU project-id list, most-recent first. */
+export function getRecentProjectIds(): string[] {
+	return readMruList(LS_KEY);
+}
+
+/** Record a jump to `projectId`, moving it to the front of the MRU list. */
+export function recordProjectJump(projectId: string): void {
+	pushMruEntry(LS_KEY, projectId, MAX_ENTRIES);
 }
 
 /**

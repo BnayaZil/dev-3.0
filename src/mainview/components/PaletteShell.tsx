@@ -121,7 +121,9 @@ export function PaletteShell<T>({
 			e.preventDefault();
 			commit(selected);
 		} else if (e.key === "Tab" && onTab) {
-			// Owns Tab before the focus trap would move focus — it is the mode switch.
+			// Tab is the mode switch. useFocusTrap sees it first (capture phase) and may
+			// move focus to the strip; the host remounts the shell per mode, and the new
+			// input's autoFocus takes focus back.
 			e.preventDefault();
 			e.stopPropagation();
 			onTab(e.shiftKey ? -1 : 1);

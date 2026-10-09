@@ -401,6 +401,7 @@ const common = {
 	"goTo.noResults.task": "No hay tareas coincidentes",
 	"goTo.noResults.combined": "Sin coincidencias",
 	"goTo.loading": "Cargando tareas…",
+	"goTo.loadFailed": "No se pudieron cargar las tareas",
 	"goTo.hint": "↑↓ mover · ⇥ cambiar modo · ⏎ abrir · esc cancelar",
 
 	// Command (action) palette — Cmd/Ctrl+Shift+P

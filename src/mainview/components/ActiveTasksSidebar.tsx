@@ -346,9 +346,9 @@ function ActiveTasksSidebar({
 	const knowsProject = useCallback((projectId: string) => projectById.has(projectId), [projectById]);
 	const taskPrMap = useTaskPrBadges({ tasks: activeTasks, knowsProject });
 
-	// Facet resolver for the token-DSL filter — the same builder the Kanban board
-	// and the "Go to" palette use. Labels/statuses/spaces resolve per the task's
-	// OWN project, so this cross-project (global-scope) pool filters correctly.
+	// Token-DSL facet resolver, shared with the "Go to" palette (the Kanban board
+	// keeps its own board-scoped one). Labels/statuses/spaces resolve per the
+	// task's OWN project, so this cross-project pool filters correctly.
 	const resolver: FacetResolver = useMemo(
 		() => buildFacetResolver({ agents, projectById, taskPorts, spaces, t, prNumberFor: (task) => taskPrMap.get(task.id)?.number ?? null }),
 		[agents, projectById, taskPorts, spaces, t, taskPrMap],

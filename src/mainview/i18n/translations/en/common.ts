@@ -400,6 +400,7 @@ const common = {
 	"goTo.noResults.task": "No matching tasks",
 	"goTo.noResults.combined": "No matches",
 	"goTo.loading": "Loading tasks…",
+	"goTo.loadFailed": "Couldn’t load tasks",
 	"goTo.hint": "↑↓ move · ⇥ switch mode · ⏎ open · esc cancel",
 
 	// Command (action) palette — Cmd/Ctrl+Shift+P

@@ -57,10 +57,10 @@ then `D`/`P`, or the breadcrumb to leave a task.
 Two rules shape the keymap there, and both are enforced in
 [`src/mainview/keymap.ts`](../src/mainview/keymap.ts):
 
-- **The browser keeps some combos** — ⌘W, ⌘T, ⌘N, ⌘1–9, ⌘0, F11, zoom, refresh — and a page cannot
-  cancel them. Those bindings do not fire in remote; the panel shows the alternative instead
+- **The browser keeps some combos** — ⌘W, ⌘T, ⌘N, ⌘1–9, ⌘0, ⇧⌘J, F11, zoom, refresh — and a page
+  cannot cancel them. Those bindings do not fire in remote; the panel shows the alternative instead
   (`G` then `1–9` for projects, `G` then `0` for Operations, `C` for a new task, `⌃B x` / `⌃B c` for
-  panes). **⇧⌘Space always opens the Command Palette**, and every action is a command — so nothing is
+  panes, ⇧⌘K then `Tab` for Go to task). **⇧⌘Space always opens the Command Palette**, and every action is a command — so nothing is
   out of reach even where a combo is lost.
 - **The shell keeps `Ctrl`** — on Windows and Linux the app modifier is Ctrl, and `^D`, `^W`, `^K`,
   `^[` belong to whatever runs in the terminal. No app shortcut fires while a terminal has focus

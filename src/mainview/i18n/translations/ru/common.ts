@@ -424,6 +424,7 @@ const common = {
 	"goTo.noResults.task": "Нет подходящих задач",
 	"goTo.noResults.combined": "Ничего не найдено",
 	"goTo.loading": "Загрузка задач…",
+	"goTo.loadFailed": "Не удалось загрузить задачи",
 	"goTo.hint": "↑↓ выбор · ⇥ сменить режим · ⏎ открыть · esc отмена",
 
 	// Command (action) palette — Cmd/Ctrl+Shift+P

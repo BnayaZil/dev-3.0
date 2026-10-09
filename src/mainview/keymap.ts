@@ -121,8 +121,14 @@ export const APP_SHORTCUTS: ShortcutSpec[] = [
 	// (the historical key), ⇧⌘J tasks, ⇧⌘L combined. Each opens the palette
 	// pre-set to its mode; Tab cycles the modes once open. Not ⌘T (new-tab, which
 	// the terminal and the browser both intercept — see go-to-project's note).
+	// ⇧⌘J is browser-reserved (Chrome downloads / DevTools console), so in remote
+	// mode Tasks is reached by ⇧⌘K then Tab, or the command palette.
 	{ id: "go-to-project", primary: [mod("KeyK", "Shift")], descKey: "keymap.shortcut.goToProject", category: "navigation" },
-	{ id: "go-to-task", primary: [mod("KeyJ", "Shift")], descKey: "keymap.shortcut.goToTask", category: "navigation" },
+	{
+		id: "go-to-task", primary: [{ ...mod("KeyJ", "Shift"), desktopOnly: true }],
+		descKey: "keymap.shortcut.goToTask", category: "navigation",
+		remoteDisplay: { mac: "⇧⌘K then ⇥", other: "Ctrl+Shift+K then Tab" },
+	},
 	{ id: "go-to-combined", primary: [mod("KeyL", "Shift")], descKey: "keymap.shortcut.goToCombined", category: "navigation" },
 	// The alias is the app's one guaranteed key: every action is also a command, so
 	// as long as the palette opens, nothing is unreachable. ⇧⌘P alone could not

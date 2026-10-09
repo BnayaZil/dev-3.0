@@ -3145,6 +3145,7 @@ function App() {
 					shortcutIndexById={quickSwitch.shortcutIndexById}
 					projectById={switcherProjectById}
 					taskPorts={state.taskPorts}
+					currentTaskId={routeTaskId(state.route)}
 					onSelectProject={(projectId) => {
 						setNavPalette(null);
 						navigateToProject(projectId);

@@ -7,7 +7,7 @@
 // Recorded centrally at App's route-change effect (covers every entry point plus
 // back/forward). Persisted in localStorage, newest-first, capped.
 
-import { orderByRecency } from "./recentProjects";
+import { orderByRecency, pushMruEntry, readMruList } from "./recentProjects";
 
 const LS_KEY = "dev3-recent-nav-v1";
 const MAX_ENTRIES = 48;
@@ -17,35 +17,21 @@ export function navKey(kind: "project" | "task", id: string): string {
 	return `${kind === "project" ? "p" : "t"}:${id}`;
 }
 
-/** Read the unified MRU key list, most-recent first. Tolerates corrupt storage. */
+/** Read the unified MRU key list, most-recent first. */
 export function getRecentNavKeys(): string[] {
-	try {
-		const raw = localStorage.getItem(LS_KEY);
-		if (!raw) return [];
-		const parsed = JSON.parse(raw);
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((k): k is string => typeof k === "string");
-	} catch {
-		return [];
-	}
+	return readMruList(LS_KEY);
 }
 
 /** Record a visit to a unified key, moving it to the front of the list. */
 export function recordNavVisit(key: string): void {
-	if (!key) return;
-	const next = [key, ...getRecentNavKeys().filter((k) => k !== key)].slice(0, MAX_ENTRIES);
-	try {
-		localStorage.setItem(LS_KEY, JSON.stringify(next));
-	} catch {
-		/* ignore — recency is best-effort */
-	}
+	pushMruEntry(LS_KEY, key, MAX_ENTRIES);
 }
 
 /**
  * Order rows (projects, spaces, tasks) by the unified visit timeline: items
  * whose `id` is a recent nav key come first in MRU order (projects and tasks
  * interleaved), then the rest in their given order. Rows with no nav key (spaces)
- * simply fall to the tail. Pure.
+ * simply fall to the tail. Reads the stored timeline on each call.
  */
 export function orderByNavRecency<T extends { id: string }>(items: T[]): T[] {
 	return orderByRecency(items, getRecentNavKeys());

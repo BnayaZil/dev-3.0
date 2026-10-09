@@ -9,7 +9,8 @@ import { useSpaces } from "../useSpaces";
 import { buildFacetResolver } from "../utils/facetResolver";
 import { fuzzyScore } from "../utils/fuzzyMatch";
 import { projectSearchHaystack } from "../utils/projectSearchHaystack";
-import { getRecentTaskIds, orderTasksByRecency } from "../utils/recentTasks";
+import { getRecentTaskIds } from "../utils/recentTasks";
+import { orderByRecency } from "../utils/recentProjects";
 import { orderByNavRecency } from "../utils/recentNav";
 import { taskQueryContext } from "../utils/taskFacets";
 import { FACET_KEYS, matchesTaskQuery, parseTaskQuery, type TaskQueryContext } from "../utils/taskSearch";
@@ -24,6 +25,12 @@ const MODE_LABEL_KEY: Record<GoToMode, TranslationKey> = {
 	project: "goTo.mode.project",
 	task: "goTo.mode.task",
 	combined: "goTo.mode.combined",
+};
+
+const NO_RESULTS_KEY: Record<GoToMode, TranslationKey> = {
+	project: "goTo.noResults.project",
+	task: "goTo.noResults.task",
+	combined: "goTo.noResults.combined",
 };
 
 /** A palette row: a project board, a space board, or a task. */
@@ -43,6 +50,8 @@ interface GoToPaletteProps {
 	projectById: Map<string, Project>;
 	/** Task id → allocated ports, for the `has:port` facet. */
 	taskPorts: ReadonlyMap<string, readonly unknown[]>;
+	/** The task on screen right now. It sinks to the bottom: it is where the user already is. */
+	currentTaskId?: string | null;
 	onSelectProject: (projectId: string) => void;
 	onSelectSpace: (spaceId: string) => void;
 	onSelectTask: (task: Task) => void;
@@ -64,6 +73,7 @@ function GoToPalette({
 	shortcutIndexById,
 	projectById,
 	taskPorts,
+	currentTaskId,
 	onSelectProject,
 	onSelectSpace,
 	onSelectTask,
@@ -75,6 +85,7 @@ function GoToPalette({
 	const { spaces } = useSpaces();
 	const [query, setQuery] = useState("");
 	const [tasks, setTasks] = useState<Task[] | null>(null);
+	const [loadFailed, setLoadFailed] = useState(false);
 
 	const needsTasks = mode === "task" || mode === "combined";
 
@@ -88,8 +99,11 @@ function GoToPalette({
 			.then((results) => {
 				if (!cancelled) setTasks(results.flatMap((r) => r.tasks));
 			})
-			.catch(() => {
-				if (!cancelled) setTasks([]);
+			.catch((err) => {
+				console.error("GoToPalette: getAllProjectTasks failed", err);
+				if (cancelled) return;
+				setLoadFailed(true);
+				setTasks([]);
 			});
 		return () => {
 			cancelled = true;
@@ -108,20 +122,26 @@ function GoToPalette({
 
 	// Newest seq first, then floated to the top by recency (persisted, survives reload).
 	const orderedTasks = useMemo(
-		() => orderTasksByRecency([...(tasks ?? [])].sort((a, b) => b.seq - a.seq), getRecentTaskIds()),
+		() => orderByRecency([...(tasks ?? [])].sort((a, b) => b.seq - a.seq), getRecentTaskIds()),
 		[tasks],
 	);
+
+	// The current task is always the most recent visit, so leaving it on top would
+	// make Enter on an empty query a no-op. Sink it instead (VS Code's Ctrl+P does the same).
+	const currentKey = currentTaskId ? `t:${currentTaskId}` : null;
+	const sinkCurrent = (list: GoItem[]): GoItem[] =>
+		currentKey ? [...list.filter((it) => it.id !== currentKey), ...list.filter((it) => it.id === currentKey)] : list;
 
 	const items = useMemo<GoItem[]>(() => {
 		const projectItems: GoItem[] = projects.map((p) => ({ kind: "project", id: `p:${p.id}`, project: p }));
 		const spaceItems: GoItem[] = spaces.map((s) => ({ kind: "space", id: `space:${s.id}`, space: s }));
 		const taskItems: GoItem[] = orderedTasks.map((task) => ({ kind: "task", id: `t:${task.id}`, task }));
 		if (mode === "project") return [...projectItems, ...spaceItems];
-		if (mode === "task") return taskItems;
+		if (mode === "task") return sinkCurrent(taskItems);
 		// Combined ("All"): interleave projects and tasks by one visit timeline
 		// (e.g. Project1 · Task4 · Project3), then spaces/never-visited at the tail.
-		return orderByNavRecency([...projectItems, ...taskItems, ...spaceItems]);
-	}, [mode, projects, spaces, orderedTasks]);
+		return sinkCurrent(orderByNavRecency([...projectItems, ...taskItems, ...spaceItems]));
+	}, [mode, projects, spaces, orderedTasks, currentKey]);
 
 	const displayText = (it: GoItem): string =>
 		it.kind === "space"
@@ -174,11 +194,9 @@ function GoToPalette({
 	const loading = needsTasks && tasks === null;
 	const noResults = loading
 		? t("goTo.loading")
-		: mode === "project"
-			? t("goTo.noResults.project")
-			: mode === "task"
-				? t("goTo.noResults.task")
-				: t("goTo.noResults.combined");
+		: loadFailed && mode === "task"
+			? t("goTo.loadFailed")
+			: t(NO_RESULTS_KEY[mode]);
 	const placeholder = mode === "project" ? t("goTo.placeholder.project") : mode === "task" ? t("goTo.placeholder.task") : t("goTo.placeholder.combined");
 
 	const cycle = (dir: 1 | -1) => {

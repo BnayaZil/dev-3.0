@@ -183,6 +183,14 @@ describe("transport-aware keymap", () => {
 		expect(matchesShortcut(key("KeyN", { meta: true }), "new-task", { ...desktopMac, remote: true })).toBe(false);
 		expect(matchesShortcut(key("KeyC"), "new-task", { ...desktopMac, remote: true })).toBe(true);
 	});
+
+	it("go-to-task yields ⇧⌘J to the browser in remote and points at ⇧⌘K + Tab", () => {
+		// Chrome keeps ⇧⌘J (downloads) / Ctrl+Shift+J (DevTools console) for itself.
+		const goToTask = APP_SHORTCUTS.find((s) => s.id === "go-to-task")!;
+		expect(matchesShortcut(key("KeyJ", { meta: true, shift: true }), "go-to-task", desktopMac)).toBe(true);
+		expect(matchesShortcut(key("KeyJ", { meta: true, shift: true }), "go-to-task", { ...desktopMac, remote: true })).toBe(false);
+		expect(shortcutKeysForMode(goToTask, true, true)).toBe("⇧⌘K then ⇥");
+	});
 });
 
 describe("matchesShortcut", () => {
