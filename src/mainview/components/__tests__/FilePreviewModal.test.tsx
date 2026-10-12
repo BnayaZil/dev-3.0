@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import FilePreviewModal from "../FilePreviewModal";
+import { highlightFileLines, SYNTAX_MAX_CHARS, SYNTAX_MAX_LINE_CHARS, SYNTAX_MAX_LINES } from "../file-preview-syntax";
 import { I18nProvider } from "../../i18n";
 import { installImmediateIntersectionObserver } from "../../test-utils/immediate-intersection";
 import type { FilePreviewResult } from "../../../shared/types";
@@ -35,6 +36,9 @@ vi.mock("../../rpc", () => ({
 	},
 }));
 
+const writeClipboardText = vi.hoisted(() => vi.fn(async (_text: string) => "clipboard" as const));
+vi.mock("../../utils/clipboard-write", () => ({ writeClipboardText }));
+
 import { api } from "../../rpc";
 
 installImmediateIntersectionObserver();
@@ -50,6 +54,10 @@ function renderModal(path = "/wt/docs/guide.md", line?: number, onClose = vi.fn(
 	};
 }
 
+function codeLine(n: number): HTMLElement {
+	return screen.getByTestId("file-preview-code").querySelector<HTMLElement>(`[data-preview-line="${n}"]`)!;
+}
+
 /** The find shortcut on a non-mac test environment (`isMac()` is false here). */
 async function pressFind(user: ReturnType<typeof userEvent.setup>) {
 	await user.keyboard("{Control>}f{/Control}");
@@ -58,6 +66,7 @@ async function pressFind(user: ReturnType<typeof userEvent.setup>) {
 describe("FilePreviewModal", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		localStorage.removeItem("dev3-file-preview-wrap");
 		mermaid.render.mockResolvedValue({
 			svg: '<svg data-testid="rendered-mermaid"></svg>',
 			diagramType: "flowchart-v2",
@@ -131,6 +140,116 @@ describe("FilePreviewModal", () => {
 		expect(screen.getByText("one").parentElement?.className).not.toContain("bg-accent/10");
 		// No markdown toggle for non-markdown files.
 		expect(screen.queryByRole("button", { name: "Raw" })).not.toBeInTheDocument();
+	});
+
+	it("soft-wraps source lines by default and copies the file unchanged either way", async () => {
+		const user = userEvent.setup();
+		const longLine = `const value = "${"x".repeat(300)}";`;
+		readFilePreview.mockResolvedValue({ kind: "text", content: `${longLine}\nnext`, truncated: false, size: 320 });
+		renderModal("/wt/src/long.ts");
+		await waitFor(() => expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-syntax", "true"));
+		const lineText = () => codeLine(1).lastElementChild!;
+		expect(lineText()).toHaveTextContent(longLine, { normalizeWhitespace: false });
+
+		const wrap = screen.getByRole("button", { name: "Wrap lines" });
+		expect(wrap).toHaveAttribute("aria-pressed", "true");
+		expect(lineText().className).toContain("whitespace-pre-wrap");
+
+		await user.click(wrap);
+		expect(wrap).toHaveAttribute("aria-pressed", "false");
+		expect(lineText().className).toMatch(/(^|\s)whitespace-pre(\s|$)/);
+		expect(localStorage.getItem("dev3-file-preview-wrap")).toBe("0");
+
+		await user.click(screen.getByText("Copy content"));
+		expect(writeClipboardText).toHaveBeenCalledWith(`${longLine}\nnext`);
+	});
+
+	it("highlights source by file language without changing the text or the copy", async () => {
+		const user = userEvent.setup();
+		const content = 'const greeting = "<b>hi</b>"; // say hi\n/** doc\n * more */\nexport function f(a: number) { return a + 1; }';
+		readFilePreview.mockResolvedValue({ kind: "text", content, truncated: false, size: content.length });
+		renderModal("/wt/src/peek.ts");
+		await waitFor(() => expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-syntax", "true"));
+
+		const code = screen.getByTestId("file-preview-code");
+		expect(code).toHaveAttribute("data-theme");
+		expect(codeLine(1).querySelector(".hljs-keyword")).toHaveTextContent("const");
+		expect(codeLine(1).querySelector(".hljs-string")).toHaveTextContent('"<b>hi</b>"');
+		expect(codeLine(1).querySelector("b")).toBeNull();
+		// A block comment keeps its colour on the line it continues onto.
+		expect(codeLine(3).querySelector(".hljs-comment")).toHaveTextContent("* more */");
+		content.split("\n").forEach((raw, i) => {
+			expect(codeLine(i + 1).lastElementChild!.textContent).toBe(raw);
+		});
+
+		await user.click(screen.getByText("Copy content"));
+		expect(writeClipboardText).toHaveBeenCalledWith(content);
+	});
+
+	it("skips highlighting past the size limits instead of stalling", () => {
+		expect(highlightFileLines("const a = 1;", "/wt/a.ts")).not.toBeNull();
+		expect(highlightFileLines(`const a = "${"x".repeat(SYNTAX_MAX_LINE_CHARS)}";`, "/wt/a.ts")).toBeNull();
+		expect(highlightFileLines("x\n".repeat(SYNTAX_MAX_LINES + 1), "/wt/a.ts")).toBeNull();
+		expect(highlightFileLines("a".repeat(SYNTAX_MAX_CHARS + 1), "/wt/a.ts")).toBeNull();
+	});
+
+	it("keeps an unknown file type as plain text", async () => {
+		readFilePreview.mockResolvedValue({ kind: "text", content: "const x = 1;", truncated: false, size: 12 });
+		renderModal("/wt/notes/data.unknownext");
+		await waitFor(() => expect(screen.getByText("const x = 1;")).toBeInTheDocument());
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-syntax", "false");
+		expect(screen.getByTestId("file-preview-code").querySelector("[class^=hljs]")).toBeNull();
+	});
+
+	it("highlights Markdown only in its source view", async () => {
+		const user = userEvent.setup();
+		readFilePreview.mockResolvedValue({ kind: "text", content: "# Title\nbody", truncated: false, size: 12 });
+		renderModal("/wt/docs/guide.md");
+		await waitFor(() => expect(screen.getByRole("heading", { name: "Title", level: 1 })).toBeInTheDocument());
+		await user.click(screen.getByRole("button", { name: "Raw" }));
+		await waitFor(() => expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-syntax", "true"));
+		expect(codeLine(1).querySelector(".hljs-section")).toHaveTextContent("# Title");
+	});
+
+	it("remembers the wrap choice for the next preview", async () => {
+		localStorage.setItem("dev3-file-preview-wrap", "0");
+		readFilePreview.mockResolvedValue({ kind: "text", content: "one", truncated: false, size: 3 });
+		renderModal("/wt/src/a.ts");
+		await waitFor(() => expect(screen.getByText("one")).toBeInTheDocument());
+		expect(screen.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "false");
+		expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-wrap", "false");
+	});
+
+	it("offers line wrapping only while markdown shows its source", async () => {
+		const user = userEvent.setup();
+		readFilePreview.mockResolvedValue({ kind: "text", content: "# Title\nbody", truncated: false, size: 12 });
+		renderModal("/wt/docs/guide.md");
+		await waitFor(() => expect(screen.getByRole("heading", { name: "Title", level: 1 })).toBeInTheDocument());
+		expect(screen.queryByRole("button", { name: "Wrap lines" })).not.toBeInTheDocument();
+
+		await user.click(screen.getByRole("button", { name: "Raw" }));
+		expect(screen.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("button", { name: "Rendered" })).toHaveAttribute("aria-pressed", "false");
+	});
+
+	it("fills the screen for a file and keeps a notice compact", async () => {
+		readFilePreview.mockResolvedValue({ kind: "text", content: "# Title\nbody", truncated: false, size: 12 });
+		const { unmount } = renderModal("/wt/docs/guide.md");
+		await waitFor(() => expect(screen.getByRole("heading", { name: "Title", level: 1 })).toBeInTheDocument());
+		const dialog = screen.getByRole("dialog");
+		expect(dialog).toHaveAttribute("data-size", "screen");
+		expect(dialog.className).toContain("sm:w-[calc(100vw-4rem)]");
+		expect(dialog.className).toContain("sm:h-[calc(100dvh-4rem)]");
+		// The document uses the whole dialog width — no centred reading column.
+		expect(screen.getByTestId("markdown-document").className).not.toMatch(/max-w-/);
+		unmount();
+
+		readFilePreview.mockResolvedValue({ kind: "binary", size: 2048 });
+		renderModal("/wt/bin/tool");
+		await waitFor(() => expect(screen.getByText(/Binary file/)).toBeInTheDocument());
+		expect(screen.getByRole("dialog")).toHaveAttribute("data-size", "compact");
+		expect(screen.getByRole("dialog").className).toContain("max-w-xl");
 	});
 
 	describe("find in file (Cmd/Ctrl+F)", () => {
@@ -281,7 +400,7 @@ describe("FilePreviewModal review comments", () => {
 				<FilePreviewModal path="/wt/src/a.ts" taskId="t1" projectId="p1" task={{ id: "t1" }} onClose={vi.fn()} />
 			</I18nProvider>,
 		);
-		await waitFor(() => expect(screen.getByText("two")).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByTestId("file-preview-code")).toHaveAttribute("data-syntax", "true"));
 		expect(screen.queryByTestId("file-review")).not.toBeInTheDocument();
 
 		selectLines(screen.getByText("two"), screen.getByText("three"), "two\nthree");
