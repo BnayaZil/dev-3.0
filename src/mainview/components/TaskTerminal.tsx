@@ -39,6 +39,7 @@ import NativePaneDividers from "./NativePaneDividers";
 import { publishNativePaneFocus } from "../native-pane-focus";
 import { fetchPaneState, runPaneAction, subscribePaneState } from "../pane-state-bus";
 import { subscribeTaskTerminalFocus } from "../terminal-focus-request";
+import { subscribeTerminalPaste } from "../terminal-paste-request";
 
 interface TaskTerminalProps {
 	projectId: string;
@@ -382,6 +383,22 @@ function TaskTerminal({ projectId, taskId, tasks, projects, navigate, dispatch, 
 			if (isNative) void fetchPaneState(taskId).catch(() => {});
 		});
 	}, [taskId, isNative]);
+
+	// Text handed over by another surface (the file explorer's "insert path")
+	// lands in the focused pane, and the keyboard follows it there. Touch compose
+	// mode owns text entry, so there it joins the composer draft instead.
+	useEffect(() => {
+		return subscribeTerminalPaste(taskId, (text) => {
+			if (touchInput && !rawMode && composerApiRef.current) {
+				composerApiRef.current.appendPaths([text.trim()]);
+				return;
+			}
+			const handle = isNative ? paneHandlesRef.current.get(nativeFocusPaneId ?? "") : termHandle;
+			if (!handle) return;
+			handle.paste(text);
+			handle.focus();
+		});
+	}, [taskId, isNative, nativeFocusPaneId, termHandle, touchInput, rawMode]);
 
 	// A handle that registers later consumes the request from onReady; this covers
 	// the pane that was already attached when the request arrived.

@@ -9,15 +9,22 @@ import ScrollToLatestButton from "./ScrollToLatestButton";
 import TerminalComposer, { type TerminalComposerApi } from "./TerminalComposer";
 import { isTouchPrimary } from "../utils/platform";
 import { BackIcon } from "./HeaderIcons";
+import { useNarrowViewport } from "../hooks/useNarrowViewport";
+import { subscribeTerminalPaste, terminalPasteTarget } from "../terminal-paste-request";
+import FileExplorerFrame from "./FileExplorerFrame";
+import { CAROUSEL_MAX_WIDTH } from "./MobileBoardCarousel";
 
 interface ProjectTerminalProps {
 	projectId: string;
 	projectPath: string;
+	projectName: string;
 	onBack: () => void;
 }
 
-function ProjectTerminal({ projectId, projectPath, onBack }: ProjectTerminalProps) {
+/** The project's "Repo" screen: a shell in the main checkout with its file explorer beside it. */
+function ProjectTerminal({ projectId, projectPath, projectName, onBack }: ProjectTerminalProps) {
 	const t = useT();
+	const isNarrow = useNarrowViewport(CAROUSEL_MAX_WIDTH);
 	const [ptyUrl, setPtyUrl] = useState<string | null>(null);
 	const [error, setError] = useState(false);
 	const [restarting, setRestarting] = useState(false);
@@ -48,7 +55,19 @@ function ProjectTerminal({ projectId, projectPath, onBack }: ProjectTerminalProp
 	}
 
 	// A session key, not a task id: no task record backs it.
-	const sessionKey = `project-${projectId}`;
+	const sessionKey = terminalPasteTarget(projectId);
+
+	// The explorer's "insert path": compose mode drafts it, otherwise it lands on the prompt.
+	useEffect(() => {
+		return subscribeTerminalPaste(sessionKey, (text) => {
+			if (touchInput && !rawMode && composerApiRef.current) {
+				composerApiRef.current.appendPaths([text.trim()]);
+				return;
+			}
+			termHandle?.paste(text);
+			termHandle?.focus();
+		});
+	}, [sessionKey, touchInput, rawMode, termHandle]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -136,6 +155,7 @@ function ProjectTerminal({ projectId, projectPath, onBack }: ProjectTerminalProp
 				</div>
 			</div>
 			<div className="relative flex-1 min-h-0 overflow-hidden">
+				<FileExplorerFrame projectId={projectId} rootLabel={projectName} enabled={!isNarrow}>
 				{ptyUrl ? (
 					<TerminalView
 						ptyUrl={ptyUrl}
@@ -156,6 +176,7 @@ function ProjectTerminal({ projectId, projectPath, onBack }: ProjectTerminalProp
 				{scrolledUp && termHandle && (
 					<ScrollToLatestButton onClick={() => termHandle.scrollToBottom()} />
 				)}
+				</FileExplorerFrame>
 			</div>
 			{/* Keep the composer mounted in raw mode (hidden) so a draft survives the toggle. */}
 			{touchInput && termHandle && (

@@ -1,8 +1,12 @@
 import { useEffect } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ProjectTerminal from "../ProjectTerminal";
 import { I18nProvider } from "../../i18n";
+import { requestTerminalPaste } from "../../terminal-paste-request";
+import { _resetFileExplorerPrefs, setFileExplorerMode } from "../../file-explorer-prefs";
+
+const { lastHandle } = vi.hoisted(() => ({ lastHandle: { current: null as null | { paste: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> } } }));
 
 vi.mock("../../rpc", () => ({
 	isElectrobun: false,
@@ -10,6 +14,7 @@ vi.mock("../../rpc", () => ({
 		request: {
 			getProjectPtyUrl: vi.fn().mockResolvedValue("ws://localhost:1234"),
 			destroyProjectTerminal: vi.fn().mockResolvedValue(undefined),
+			listExplorerDirectory: vi.fn().mockResolvedValue({ root: "/home/user/project", relPath: "", entries: [] }),
 		},
 	},
 }));
@@ -20,7 +25,9 @@ vi.mock("../../TerminalView", () => ({
 	default: ({ onReady }: { onReady?: (handle: unknown) => void }) => {
 		// In an effect, not during render — the host setState would land outside act().
 		useEffect(() => {
-			onReady?.({ focus: vi.fn(), blur: vi.fn(), paste: vi.fn(), scrollToBottom: vi.fn(), write: vi.fn() });
+			const handle = { focus: vi.fn(), blur: vi.fn(), paste: vi.fn(), scrollToBottom: vi.fn(), write: vi.fn() };
+			lastHandle.current = handle;
+			onReady?.(handle);
 		}, [onReady]);
 		return <div data-testid="terminal-view" />;
 	},
@@ -58,6 +65,7 @@ function renderTerminal(onBack = vi.fn()) {
 				<ProjectTerminal
 					projectId="p1"
 					projectPath="/home/user/project"
+					projectName="project"
 					onBack={onBack}
 				/>
 			</I18nProvider>,
@@ -113,5 +121,32 @@ describe("ProjectTerminal — touch input gate", () => {
 		renderTerminal();
 		await screen.findByTestId("terminal-view");
 		expect(screen.queryByTestId("extra-key-bar")).not.toBeInTheDocument();
+	});
+});
+
+describe("ProjectTerminal — Repo explorer", () => {
+	afterEach(() => {
+		localStorage.removeItem("dev3-file-explorer");
+		_resetFileExplorerPrefs();
+	});
+
+	it("lays the project explorer beside the terminal", async () => {
+		setFileExplorerMode("pinned");
+		renderTerminal();
+		expect(await screen.findByTestId("file-explorer")).toBeInTheDocument();
+		expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+	});
+
+	it("types an inserted path into the project terminal", async () => {
+		renderTerminal();
+		await screen.findByTestId("terminal-view");
+		await waitFor(() => expect(lastHandle.current).not.toBeNull());
+		// Let the host commit the handle it was given, so its paste subscription sees it.
+		await act(async () => {});
+		act(() => requestTerminalPaste("project-p1", "src/a.ts "));
+		expect(lastHandle.current?.paste).toHaveBeenCalledWith("src/a.ts ");
+		expect(lastHandle.current?.focus).toHaveBeenCalled();
+		act(() => requestTerminalPaste("task-1", "other.ts "));
+		expect(lastHandle.current?.paste).toHaveBeenCalledTimes(1);
 	});
 });

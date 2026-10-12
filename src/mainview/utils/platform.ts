@@ -10,6 +10,12 @@ export function isMac(): boolean {
 	return /Mac|iPhone|iPad|iPod/.test(platform) || ua.includes("Macintosh");
 }
 
+/** The renderer's own OS. In the desktop shell that is also the host's; in a browser tab it is not. */
+export function isWindows(): boolean {
+	if (typeof navigator === "undefined") return false;
+	return /Win/.test(navigator.platform || "") || (navigator.userAgent || "").includes("Windows");
+}
+
 /**
  * Whether an event carries the platform's app-shortcut modifier, as declared in
  * `keymap.ts` (`⌘X` on macOS, `Ctrl+X` elsewhere). Accepting either modifier on

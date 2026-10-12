@@ -1441,6 +1441,13 @@ function App() {
 				if (showQuitDialog) return;
 				if (state.route.screen === "agent-traffic") dispatch({ type: "goBack" });
 				else navigate({ screen: "agent-traffic", scopeProjectId: projectIdForRoute(state.route) ?? undefined });
+			} else if (matchesShortcut(e, "toggle-file-explorer")) {
+				// Capture phase so a focused terminal cannot swallow it.
+				e.preventDefault();
+				e.stopPropagation();
+				if (showQuitDialog) return;
+				// Through the router: on a board the toggle navigates to the Repo screen.
+				handleMenuBarAction("view-toggle-file-explorer");
 			} else if (matchesShortcut(e, "help-mode")) {
 				// Help mode ("Explain this screen"): every data-help-id zone gets an (i)
 				// badge with a HelpCard. Sibling of the shortcuts reference overlay.
@@ -1587,7 +1594,7 @@ function App() {
 				}
 			}
 		},
-		[armGoToIndex, armGoToVerb, clearGoTo, createTaskProjectId, cycleVariant, dispatch, goToCurrentProject, goToProjectIndex, hintMode, navigate, navigateToProject, openAddProject, openCreateTaskModal, openInCurrent, openQuickShell, showAddProjectModal, showQuitDialog, state.projects, state.route, toggleTerminalImmersive],
+		[armGoToIndex, armGoToVerb, clearGoTo, createTaskProjectId, cycleVariant, dispatch, goToCurrentProject, goToProjectIndex, handleMenuBarAction, hintMode, navigate, navigateToProject, openAddProject, openCreateTaskModal, openInCurrent, openQuickShell, showAddProjectModal, showQuitDialog, state.projects, state.route, toggleTerminalImmersive],
 		{ capture: true },
 	);
 
@@ -3847,6 +3854,7 @@ function App() {
 						<ProjectTerminal
 							projectId={route.projectId}
 							projectPath={proj.path}
+							projectName={proj.name}
 							onBack={() => navigate({ screen: "project", projectId: route.projectId })}
 						/>
 					</div>

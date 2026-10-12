@@ -2,6 +2,7 @@ import { api } from "./rpc";
 import { startClosePanePicker } from "./close-pane-picker";
 import { toggleStreamerMode } from "./streamer-mode";
 import { openAgentTrafficLog } from "./agent-traffic-events";
+import { showFileExplorer, toggleFileExplorer } from "./file-explorer-prefs";
 import { toast } from "./toast";
 import { playTaskCompletionSound, taskSoundDiagnostics } from "./task-sounds";
 import { moveTaskToStatus } from "./utils/moveTaskToStatus";
@@ -40,6 +41,23 @@ function currentProjectId(state: AppState): string | undefined {
 		return r.projectId;
 	}
 	return undefined;
+}
+
+/**
+ * The explorer lives beside a terminal: a task's, or the project's own on the
+ * Repo screen. From a plain board the toggle takes you to Repo with the tree
+ * shown; where there is no terminal to sit beside, it does nothing.
+ */
+function toggleFileExplorerForRoute(ctx: RouterCtx): void {
+	const r = ctx.state.route;
+	if (r.screen === "task" || r.screen === "project-terminal" || (r.screen === "project" && r.activeTaskId)) {
+		toggleFileExplorer();
+		return;
+	}
+	if (r.screen !== "project" || r.spaceId || r.taskView) return;
+	if (ctx.state.projects.find((p) => p.id === r.projectId)?.kind === "virtual") return;
+	showFileExplorer();
+	navigate(ctx, { screen: "project-terminal", projectId: r.projectId });
 }
 
 function currentTaskId(state: AppState): string | undefined {
@@ -440,6 +458,9 @@ export async function handleMenuAction(action: string, ctx: RouterCtx): Promise<
 		case "view-agent-traffic-log":
 			openAgentTrafficLog();
 			return;
+		case "view-toggle-file-explorer":
+			toggleFileExplorerForRoute(ctx);
+			return;
 		case "help-keyboard-shortcuts":
 			window.dispatchEvent(new CustomEvent("menu:show-keyboard-shortcuts"));
 			return;
@@ -483,6 +504,7 @@ export const BROWSER_HANDLED_ACTIONS: ReadonlySet<string> = new Set<string>([
 	// The traffic log is a renderer overlay, so it works in a browser tab too — it
 	// was only ever missing here, which left remote users on ⇧⌘M and the palette.
 	"view-agent-traffic-log",
+	"view-toggle-file-explorer",
 	"go-back", "go-forward", "gauge-demo", "viewport-lab", "native-pane-layout-lab", "update-popover-preview", "feature-flags",
 	"terminal-perf-overlay",
 	"debug-play-sound-completed", "debug-play-sound-cancelled", "debug-push-sound-completed",

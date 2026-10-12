@@ -139,3 +139,44 @@ describe("handleMenuAction — task-move-* goes through moveTaskToStatus", () =>
 		expect(moveTaskToStatus).toHaveBeenCalledWith(expect.objectContaining({ task, project, newStatus }));
 	});
 });
+
+describe("handleMenuAction — view-toggle-file-explorer", () => {
+	function routeCtx(route: unknown, kind: "git" | "virtual" = "git") {
+		return {
+			state: { route, projects: [{ id: "p1", kind }] } as unknown as AppState,
+			dispatch: vi.fn(),
+			setLocale: vi.fn(),
+			t: ((key: string) => key) as never,
+		};
+	}
+
+	it("on a board opens the Repo screen with the explorer shown", async () => {
+		const { _resetFileExplorerPrefs, getFileExplorerPrefs } = await import("../file-explorer-prefs");
+		localStorage.removeItem("dev3-file-explorer");
+		_resetFileExplorerPrefs();
+		const c = routeCtx({ screen: "project", projectId: "p1" });
+		await handleMenuAction("view-toggle-file-explorer", c);
+		expect(c.dispatch).toHaveBeenCalledWith({ type: "navigate", route: { screen: "project-terminal", projectId: "p1" } });
+		expect(getFileExplorerPrefs().mode).toBe("pinned");
+	});
+
+	it("toggles in place beside a terminal, and does nothing where there is none", async () => {
+		const { _resetFileExplorerPrefs, getFileExplorerPrefs } = await import("../file-explorer-prefs");
+		localStorage.removeItem("dev3-file-explorer");
+		_resetFileExplorerPrefs();
+		const onRepo = routeCtx({ screen: "project-terminal", projectId: "p1" });
+		await handleMenuAction("view-toggle-file-explorer", onRepo);
+		expect(getFileExplorerPrefs().mode).toBe("pinned");
+		expect(onRepo.dispatch).not.toHaveBeenCalled();
+
+		for (const c of [
+			routeCtx({ screen: "project", projectId: "p1" }, "virtual"),
+			routeCtx({ screen: "project", projectId: "p1", spaceId: "s1" }),
+			routeCtx({ screen: "dashboard" }),
+		]) {
+			await handleMenuAction("view-toggle-file-explorer", c);
+			expect(c.dispatch).not.toHaveBeenCalled();
+		}
+		expect(getFileExplorerPrefs().mode).toBe("pinned");
+	});
+});

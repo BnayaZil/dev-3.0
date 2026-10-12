@@ -461,11 +461,12 @@ const common = {
 	"command.moveUserQuestions": "Mover a «User Questions»",
 	"command.moveReviewAi": "Mover a «Review by AI»",
 	"command.moveReviewUser": "Mover a «Review by User»",
-	"command.openProjectTerminal": "Abrir terminal del proyecto",
+	"command.openProjectTerminal": "Abrir repo (terminal y archivos del proyecto)",
 	"command.openQuickShell": "Abrir Shell rápido",
 	"command.tmuxCheatSheet": "Mostrar referencia de tmux",
 	"command.keyboardShortcuts": "Atajos de teclado",
 	"command.agentTrafficLog": "Tráfico de agentes",
+	"command.toggleFileExplorer": "Mostrar u ocultar el explorador",
 
 	// Open in...
 	"openIn.menuTitle": "Abrir en...",

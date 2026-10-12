@@ -1182,7 +1182,7 @@ describe("GlobalHeader — project terminal button", () => {
 
 	it("shows terminal button when inside a project", () => {
 		renderHeader({ screen: "project", projectId: "p1" });
-		expect(screen.getByText("Terminal")).toBeInTheDocument();
+		expect(screen.getByText("Repo")).toBeInTheDocument();
 	});
 
 	it("keeps quick shell out of the bar and inside the kebab menu, icon included", async () => {
@@ -1222,12 +1222,12 @@ describe("GlobalHeader — project terminal button", () => {
 
 	it("does not show terminal button on dashboard", () => {
 		renderHeader({ screen: "dashboard" });
-		expect(screen.queryByText("Terminal")).not.toBeInTheDocument();
+		expect(screen.queryByText("Repo")).not.toBeInTheDocument();
 	});
 
 	it("terminal button has active style on project-terminal screen", () => {
 		renderHeader({ screen: "project-terminal", projectId: "p1" });
-		const btn = screen.getByLabelText("Project Terminal (\u2318`)");
+		const btn = screen.getByLabelText("Repo: terminal and files (\u2318`)");
 		expect(btn.className).toContain("text-accent");
 	});
 
@@ -1235,7 +1235,7 @@ describe("GlobalHeader — project terminal button", () => {
 		const user = userEvent.setup();
 		const navigate = vi.fn();
 		renderHeader({ screen: "project", projectId: "p1" }, [project1, project2], navigate);
-		await user.click(screen.getByLabelText("Project Terminal (\u2318`)"));
+		await user.click(screen.getByLabelText("Repo: terminal and files (\u2318`)"));
 		expect(navigate).toHaveBeenCalledWith({
 			screen: "project-terminal",
 			projectId: "p1",
@@ -1246,7 +1246,7 @@ describe("GlobalHeader — project terminal button", () => {
 		const user = userEvent.setup();
 		const navigate = vi.fn();
 		renderHeader({ screen: "project-terminal", projectId: "p1" }, [project1, project2], navigate);
-		await user.click(screen.getByLabelText("Project Terminal (\u2318`)"));
+		await user.click(screen.getByLabelText("Repo: terminal and files (\u2318`)"));
 		expect(navigate).toHaveBeenCalledWith({
 			screen: "project",
 			projectId: "p1",
@@ -1304,8 +1304,8 @@ describe("GlobalHeader — compact layout", () => {
 		mockMatchMedia(true);
 		renderHeader({ screen: "project", projectId: "p1" });
 		// Buttons stay reachable by title, but their text labels collapse away.
-		expect(screen.getByLabelText("Project Terminal (⌘`)")).toBeInTheDocument();
-		expect(screen.queryByText("Terminal")).not.toBeInTheDocument();
+		expect(screen.getByLabelText("Repo: terminal and files (⌘`)")).toBeInTheDocument();
+		expect(screen.queryByText("Repo")).not.toBeInTheDocument();
 		expect(screen.queryByText("Report")).not.toBeInTheDocument();
 		expect(screen.queryByText("Change Log")).not.toBeInTheDocument();
 	});
@@ -1333,7 +1333,7 @@ describe("GlobalHeader — compact layout", () => {
 		// "Terminal" label). GitHub / Report / Changelog now always live in the
 		// kebab ("More") menu — there is no standalone changelog button anymore,
 		// so assert it via the opened menu instead.
-		expect(screen.getByText("Terminal")).toBeInTheDocument();
+		expect(screen.getByText("Repo")).toBeInTheDocument();
 		expect(screen.queryByLabelText("View changelog")).not.toBeInTheDocument();
 		const more = screen.getByLabelText("More");
 		await user.click(more);
@@ -1555,7 +1555,7 @@ describe("GlobalHeader — narrow viewport action sheet", () => {
 		renderHeader({ screen: "project", projectId: "p1" });
 		expect(screen.getByLabelText("More")).toBeInTheDocument();
 		// Inline simple-action buttons are gone (folded into the sheet).
-		expect(screen.queryByLabelText("Project Terminal (⌘`)")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Repo: terminal and files (⌘`)")).not.toBeInTheDocument();
 	});
 
 	it("folds the memory readout off the header and into the sheet", async () => {
@@ -1592,7 +1592,7 @@ describe("GlobalHeader — narrow viewport action sheet", () => {
 		await user.click(screen.getByLabelText("More"));
 		expect(screen.getByTestId("header-action-sheet")).toBeInTheDocument();
 		expect(screen.getByText("Command palette")).toBeInTheDocument();
-		expect(screen.getByText("Project Terminal")).toBeInTheDocument();
+		expect(screen.getByText("Repo")).toBeInTheDocument();
 		expect(screen.getByText("Settings")).toBeInTheDocument();
 	});
 
@@ -1612,7 +1612,7 @@ describe("GlobalHeader — narrow viewport action sheet", () => {
 		const navigate = vi.fn();
 		renderHeader({ screen: "project", projectId: "p1" }, [project1, project2], navigate);
 		await user.click(screen.getByLabelText("More"));
-		await user.click(screen.getByText("Project Terminal"));
+		await user.click(screen.getByText("Repo"));
 		expect(navigate).toHaveBeenCalledWith({ screen: "project-terminal", projectId: "p1" });
 	});
 

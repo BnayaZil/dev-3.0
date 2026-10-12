@@ -484,11 +484,12 @@ const common = {
 	"command.moveUserQuestions": "В колонку «User Questions»",
 	"command.moveReviewAi": "В колонку «Review by AI»",
 	"command.moveReviewUser": "В колонку «Review by User»",
-	"command.openProjectTerminal": "Открыть терминал проекта",
+	"command.openProjectTerminal": "Открыть репо (терминал и файлы проекта)",
 	"command.openQuickShell": "Открыть быструю консоль",
 	"command.tmuxCheatSheet": "Показать шпаргалку tmux",
 	"command.keyboardShortcuts": "Горячие клавиши",
 	"command.agentTrafficLog": "Трафик агентов",
+	"command.toggleFileExplorer": "Показать или скрыть проводник",
 
 	// Open in...
 	"openIn.menuTitle": "Открыть в...",

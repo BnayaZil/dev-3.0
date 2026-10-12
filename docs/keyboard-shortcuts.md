@@ -25,6 +25,7 @@ this page and the website all read from it.
 | Help mode (explain this screen) | ⇧⌘/ | Ctrl+Shift+/ |
 | Open current project/worktree in an app (picker) | ⌘O | Ctrl+O |
 | Terminal immersive fullscreen | F11 / ⇧⌘F | F11 / Ctrl+Shift+F |
+| Show or hide the file explorer | ⇧⌘E | Ctrl+Shift+B |
 | Find in the focused terminal | ⌘F | Ctrl+Shift+F |
 | Find in an HTML artifact | ⌘F | Ctrl+F |
 | Find in an open file preview | ⌘F | Ctrl+F |
@@ -43,7 +44,7 @@ this page and the website all read from it.
 | Settings | ⌘, | Ctrl+, |
 | Zoom in / out / reset | ⌘= / ⌘- / ⌘0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 | Hard refresh | ⌘R | Ctrl+R |
-| Toggle project terminal / open Quick Shell | ⌘` / ⇧⌘` | Ctrl+` / Ctrl+Shift+` |
+| Toggle Repo (project terminal and files) / open Quick Shell | ⌘` / ⇧⌘` | Ctrl+` / Ctrl+Shift+` |
 | Close dialog / step back (not inside a task) | Esc | Esc |
 | Quit / Hide | ⌘Q / ⌘H | Ctrl+Q / Ctrl+H |
 

@@ -122,16 +122,13 @@ export function QuickShellIcon({ className }: HeaderIconProps) {
 	);
 }
 
-// 08 — Project Terminal: title-bar dots pulse, prompt types, cursor blinks.
+// 08 — Repo (project terminal + files): the prompt types inside the folder, cursor blinks.
 export function ProjectTerminalIcon({ className }: HeaderIconProps) {
 	return (
 		<svg {...svgBase(className)}>
-			<rect x="2.5" y="4" width="19" height="16" rx="2.5" />
-			<path d="M2.5 8h19" />
-			<circle cx="5.4" cy="6" r="0.55" fill="currentColor" stroke="none" className="hdr-ptd1" />
-			<circle cx="7.6" cy="6" r="0.55" fill="currentColor" stroke="none" className="hdr-ptd2" />
-			<path d="m6.5 11.5 2.5 2.25L6.5 16" pathLength={1} className="hdr-draw hdr-pt-prompt" />
-			<path d="M12 16h4.5" className="hdr-pt-cursor" />
+			<path d="M3 7a2 2 0 0 1 2-2h4.2l2 2.2H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+			<path d="m7.5 11.75 2.5 2.25-2.5 2.25" pathLength={1} className="hdr-draw hdr-pt-prompt" />
+			<path d="M12.5 16.25h4" className="hdr-pt-cursor" />
 		</svg>
 	);
 }

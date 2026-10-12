@@ -87,7 +87,7 @@ describe("TmuxSessionManager", () => {
 
 		// Popover should show the project terminal entry
 		expect(screen.getByText("dev-3.0")).toBeInTheDocument();
-		expect(screen.getByText("Project Terminal")).toBeInTheDocument();
+		expect(screen.getByText("Repo")).toBeInTheDocument();
 	});
 
 	it("does not refetch immediately when opening the popover after a fresh load", async () => {
@@ -103,7 +103,7 @@ describe("TmuxSessionManager", () => {
 		await user.click(screen.getByLabelText("tmux Sessions"));
 
 		await waitFor(() => {
-			expect(screen.getByText("Project Terminal")).toBeInTheDocument();
+			expect(screen.getByText("Repo")).toBeInTheDocument();
 		});
 		expect(mockedApi.request.listTmuxSessions).toHaveBeenCalledTimes(1);
 	});

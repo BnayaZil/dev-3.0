@@ -119,7 +119,7 @@ const dashboard = {
 	"header.devServerStartTitle": "Dev-сервер остановлен — нажми, чтобы запустить",
 	"header.devServerStartingTitle": "Dev-сервер запускается…",
 	"header.devServerRunningTitle": "Dev-сервер работает — нажми для управления",
-	"header.fileBrowser": "Файлы",
+	"header.fileBrowser": "Проводник",
 	"header.changelog": "Журнал изменений",
 	"header.changelogLabel": "Change Log",
 	"header.changelogTooltip": "Журнал изменений",
