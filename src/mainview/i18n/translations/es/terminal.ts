@@ -140,6 +140,9 @@ const terminal = {
 	"tmux.closePaneConfirmTitle": "¿Cerrar el último panel?",
 	"tmux.closePaneConfirmMessage": "Este es el único panel restante — cerrarlo destruirá toda la sesión de tmux y terminará el agente. ¿Estás seguro?",
 	"tmux.closePaneConfirmLabel": "Cerrar panel",
+	"tmux.closePaneAskTitle": "¿Cerrar el panel {index}?",
+	"tmux.closePaneAskMessage": "Se cerrará el panel y todo lo que se esté ejecutando en él.",
+	"tmux.closePaneAskFailed": "No se pudieron leer los paneles, así que no se cerró nada.",
 	"tmux.selectPaneDesc": "Haz clic en un panel para seleccionarlo",
 	"tmux.resizePaneDesc": "Arrastra el borde del panel para redimensionar",
 
