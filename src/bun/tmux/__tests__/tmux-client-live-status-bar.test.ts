@@ -110,6 +110,41 @@ describe.skipIf(!tmuxVersion())("dev3 status bar on a live tmux server", () => {
 		expect(sessionStatus("solo")).toBe("");
 	});
 
+	it("keeps the bar off in a session the app turned it off for, as windows come and go", () => {
+		tmux("new-session", "-d", "-s", "nav", "sh");
+		tmux("set-option", "-t", "=nav:", "status", "off");
+		const second = tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=nav:", "sh");
+		expect(sessionStatus("nav")).toBe("off");
+		tmux("kill-window", "-t", second);
+		expect(sessionStatus("nav")).toBe("off");
+	});
+
+	it("opens a new window in the background, whoever asks — no -d needed", () => {
+		tmux("new-session", "-d", "-s", "bg", "sh");
+		const activeBefore = tmux("display-message", "-p", "-t", "=bg:", "#{window_id}");
+		tmux("new-window", "-t", "=bg:", "sh");
+		tmux("neww", "-t", "=bg:", "sh");
+		expect(tmux("display-message", "-p", "-t", "=bg:", "#{session_windows}")).toBe("3");
+		expect(tmux("display-message", "-p", "-t", "=bg:", "#{window_id}")).toBe(activeBefore);
+	});
+
+	it("⌃B c still lands on the window it creates", () => {
+		const binding = tmux("list-keys", "-T", "prefix", "c");
+		expect(binding).toContain("new-window -d");
+		expect(binding).toContain('select-window -t "{end}"');
+	});
+
+	it("the bar's + lands on the window it creates, like ⌃B c", () => {
+		const binding = tmux("list-keys", "-T", "root", "MouseDown1Status");
+		expect(binding).toContain("new-window -c");
+		expect(binding).toContain('select-window -t \\"{end}\\"');
+		// The + branch exactly as bound, run against a session: the new window ends up active.
+		tmux("new-session", "-d", "-s", "plus", "sh");
+		tmux("if-shell", "-F", "1", 'new-window -t "=plus:" sh ; select-window -t "=plus:{end}"', "");
+		const last = tmux("list-windows", "-t", "=plus", "-F", "#{window_active}").split("\n").pop();
+		expect(last).toBe("1");
+	});
+
 	it("shows only the focused pane's id beside the tabs", () => {
 		expect(tmux("show-options", "-gv", "status-left")).toBe("");
 		const right = tmux("show-options", "-gv", "status-right");

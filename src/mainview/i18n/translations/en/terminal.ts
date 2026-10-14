@@ -81,6 +81,17 @@ const terminal = {
 	"windowPager.next": "Next window",
 	"windowPager.switchWindow": "Switch window",
 	"windowPager.window": "Window {index}",
+	"windowPager.home": "Back to the agent",
+	"windowNav.arrived": "Window opened: {name}",
+	"windowNav.close": "Close {name}",
+	"windowNav.switchTo": "Switch to this window",
+	"windowNav.home": "agent",
+	"windowNav.homeWorking": "agent, working",
+	"windowNav.homeWaiting": "agent, waiting for you",
+	"windowNav.bell": "bell",
+	"windowNav.newOutput": "new output",
+	"windowNav.panes_one": "{count} pane",
+	"windowNav.panes_other": "{count} panes",
 
 	// Pane zoom indicator (full viewport: a tmux pane is zoomed)
 	"paneZoom.badge": "Zoomed",

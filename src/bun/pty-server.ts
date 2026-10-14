@@ -1099,6 +1099,17 @@ export async function syncTmuxTaskTitle(taskId: string, title: string): Promise<
 	});
 }
 
+/**
+ * A task terminal shows its windows in the app's own navigator, so its tmux
+ * window bar goes. Runs after configureTmux clears stale overrides; no hook
+ * turns a session's bar back on, so this per-session `off` holds.
+ */
+async function hideTmuxWindowBar(session: PtySession): Promise<void> {
+	const target = `=${session.tmuxSessionName}:`;
+	const opts = { socket: session.tmuxSocket, bestEffort: true };
+	await tmux.setOption(target, "status", "off", opts);
+}
+
 /** Seed the title on attach — the session may predate dev3 knowing it (app restart, resume). */
 async function syncTmuxTaskTitleFromBoard(session: PtySession): Promise<void> {
 	try {
@@ -2086,7 +2097,10 @@ function spawnPty(session: PtySession, cols: number, rows: number): void {
 		(async () => {
 			try {
 				await configureTmux(tmuxSessionName, session.tmuxSocket);
-				if (session.sessionType === "task") void syncTmuxTaskTitleFromBoard(session);
+				if (session.sessionType === "task") {
+					void syncTmuxTaskTitleFromBoard(session);
+					void hideTmuxWindowBar(session);
+				}
 				const sessionSocket = session.tmuxSocket;
 				tmux.setEnvironment(tmuxSessionName, "DEV3_WORKTREE_ROOT", session.cwd, { socket: sessionSocket }).catch(() => {});
 				const envKeys = Object.keys(session.env);

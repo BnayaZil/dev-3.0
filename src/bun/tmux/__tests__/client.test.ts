@@ -196,9 +196,10 @@ describe("list/parse methods", () => {
 	});
 
 	it("listWindows and listSessions pass the format string", async () => {
-		const { client, spawnFn } = makeClient({ stdout: "@1\t1\tmain\n" });
+		// The pane title is the free-text tail: a TAB inside it must not shift the columns.
+		const { client, spawnFn } = makeClient({ stdout: "@1\t0\t1\t2\t1700\t0\tbox\tmain\tFix\tauth\n" });
 		const windows = await client.listWindows(WINDOW_SWITCHER_FORMAT, { target: "dev3-abc" });
-		expect(windows).toEqual([{ windowId: "@1", active: true, name: "main" }]);
+		expect(windows).toEqual([{ windowId: "@1", index: 0, active: true, panes: 2, activity: 1700, bell: false, hostShort: "box", name: "main", title: "Fix\tauth" }]);
 		expect(argvOf(spawnFn)).toContain(WINDOW_SWITCHER_FORMAT.formatString);
 
 		const { client: sessions, spawnFn: sessionsSpawn } = makeClient({ stdout: "dev3-a\t1\t123\t/tmp\n" });
@@ -282,6 +283,23 @@ describe("splitWindow / newWindow", () => {
 			"tmux", "-L", "dev3", "new-window", "-d", "-n", "Runs",
 			"-P", "-F", "#{pane_id}", "-e", "DEV3_TASK_SEQ=7", "-t", "dev3-abc:", "cmd",
 		]);
+	});
+});
+
+describe("newWindow focus", () => {
+	it("an explicit user action creates the window, then selects exactly the pane it got", async () => {
+		const { client, spawnFn } = makeClient({ stdout: "%12\n" });
+		const result = await client.newWindow({ target: "dev3-abc:", cwd: "/wt", focus: true });
+		expect(argvOf(spawnFn, 0)).toEqual(["tmux", "-L", "dev3", "new-window", "-P", "-F", "#{pane_id}", "-t", "dev3-abc:", "-c", "/wt"]);
+		expect(argvOf(spawnFn, 1)).toEqual(["tmux", "-L", "dev3", "select-window", "-t", "%12"]);
+		// The caller did not ask for the pane id, so the contract stays "null".
+		expect(result.paneId).toBeNull();
+	});
+
+	it("without focus nothing is selected — the window stays in the background", async () => {
+		const { client, spawnFn } = makeClient({ stdout: "" });
+		await client.newWindow({ target: "dev3-abc:" });
+		expect(spawnFn).toHaveBeenCalledTimes(1);
 	});
 });
 

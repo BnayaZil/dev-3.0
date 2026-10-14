@@ -257,10 +257,11 @@ set -g status-position top
 set -g status-right "${PANE_ID_BADGE}"
 set -g status-left ""
 
-# A + button right after the last tab opens a window like Cmd+T: same cwd rule.
+# A + button right after the last tab opens a window like Cmd+T: same cwd rule, and
+# it selects the new (last) window, since new-window itself stays in the background.
 # Any other click keeps tmux's default (switch to the clicked tab).
 set -g 'status-format[0]' '${STATUS_FORMAT}'
-bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},${NEW_WINDOW_STATUS_RANGE}}' 'new-window -c "${PANE_CWD_FORMAT}"' 'switch-client -t ='
+bind -n MouseDown1Status if -F '#{==:#{mouse_status_range},${NEW_WINDOW_STATUS_RANGE}}' 'new-window -c "${PANE_CWD_FORMAT}" ; select-window -t "{end}"' 'switch-client -t ='
 
 # The bar stays visible with a single window too. Earlier configs hid it through
 # these hooks, and re-sourcing never drops a hook on a live server — unset them.
@@ -268,6 +269,14 @@ set-hook -gu window-linked
 set-hook -gu window-unlinked
 set-hook -gu client-attached
 set-hook -gu client-session-changed
+
+# A new window never takes the screen on its own: an agent or a script opening
+# one must not hide the agent. Explicit user actions switch on purpose — the app
+# selects the window it created, and ⌃B c selects the new last window itself.
+# Decision: decisions/2026/10/03/new-tmux-windows-open-in-background.md
+set -s command-alias[90] 'new-window=new-window -d'
+set -s command-alias[91] 'neww=new-window -d'
+bind c new-window -c "${PANE_CWD_FORMAT}" \\; select-window -t "{end}"
 `;
 
 /**

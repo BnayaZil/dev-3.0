@@ -473,11 +473,9 @@ Folded: rule and reasoning in `decisions/2026/07/03/close-pane-visual-picker.md`
 - **Why:** Audit showed the "narrow = OK" verdict was wrong: non-wrapping icon row, ~28px targets, reorder fully touch-dead (HTML5 drag + `hidden md:flex` steps); the doctrine's kebab→sheet fixes all three with zero desktop change.
 - **Status:** Observed (2026-06-29). Evidence: `ActivityOverview.tsx`.
 
-## 2026-06-29 — Narrow-viewport tmux windows switcher (pairs with the panes switcher)
+## 2026-06-29 — Narrow-viewport tmux windows switcher
 
-- **Rule:** Sub-768px terminals get a windows switcher bar above the panes bar (buttons + dropdown, NO swipe — the pane carousel owns horizontal swipe on that surface), shown only when window count > 1.
-- **Why:** Windows were the one terminal affordance with no mobile form (doctrine §4); reuses the panes-switcher idiom; a dedicated `tmuxWindowNavigate` RPC returns layout (same reason `tmuxPaneNavigate` exists). Decision 093.
-- **Status:** Observed (2026-06-29). Evidence: `MobileWindowCarousel.tsx`, `rpc-handlers/tmux-pty.ts`.
+Folded into bible §12 (terminal windows row).
 
 ## 2026-06-29 — Dev-server button states: green = running only, spinner = transient only
 
@@ -720,3 +718,7 @@ Folded: screens, not URL routes (the `Route` union in `state.ts`) — owned by `
 ## 2026-10-12 — The file explorer lives beside a terminal, never on the board
 - **Rule:** yaml `file_explorer`: task terminal or the Repo screen (`project-terminal`, renamed); on a board ⇧⌘E opens Repo; auto-hide overlays, never reflows.
 - **Why:** "insert path" needs a terminal and the board is task triage. Rejected a Board/Files switch (a destination hidden in a toolbar, IDE drift) and a Files destination (budget spent). `decisions/2026/10/02/file-explorer-panel.md`.
+
+## 2026-10-02 — Desktop tmux windows get an in-app navigator: a tab row on top
+- **Rule:** a task terminal always shows a tab row on top instead of the tmux bar; agent ✦ first; new windows open in the background unless the user asked. Bible §12.
+- **Why:** a new window hid the agent, read as "my task vanished". Rejected breadcrumb, overview-only, and a vertical rail + style setting (tried, dropped 2026-10-14 to keep one layout). User-selected. Evidence: `decisions/2026/10/02/tmux-window-navigator.md`.
