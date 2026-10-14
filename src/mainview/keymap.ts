@@ -9,7 +9,7 @@ import {
 	type Binding,
 	type MatchContext,
 } from "./keymap-bindings";
-import { isKeymapCapturing, resolvedSlot } from "./keymap-store";
+import { hasOverride, isKeymapCapturing, resolvedSlot } from "./keymap-store";
 import { isKeyboardLocked } from "./keyboard-lock";
 import { isMac, isRemote } from "./utils/platform";
 import { isTerminalFocus, isTypingContext } from "./utils/typing-context";
@@ -30,10 +30,10 @@ import { isTerminalFocus, isTypingContext } from "./utils/typing-context";
  * `alias`. The user sets each on its own, so "the second way to press it" is a
  * first-class thing rather than an extra element in a list.
  *
- * Terminal/tmux PREFIX bindings (⌃B …, and the prefix-free ⌥+arrows) are NOT here
+ * Terminal/tmux PREFIX bindings (⌃B …, and the prefix-free ⌥⇧+arrows) are NOT here
  * — tmux owns them (`src/bun/tmux/config.ts`) and the modal's Terminal tab shows
  * them. The ⌘-key pane shortcuts below ARE here: the renderer dispatches those,
- * so they are ours to rebind.
+ * so they are ours to rebind — `tmux-prefix` included, which types ⌃B for you.
  */
 
 export type ShortcutCategory = "navigation" | "create" | "view" | "terminal" | "app";
@@ -240,8 +240,7 @@ export const APP_SHORTCUTS: ShortcutSpec[] = [
 	},
 	// Pane control, formerly the opt-in "iTerm2 compatibility" preset and now just
 	// how dev3 works. `terminal` group: they only fire while a terminal has focus,
-	// so they may share a combo with an app-level shortcut. Pane *navigation* is
-	// deliberately absent — tmux already binds ⌥+arrows prefix-free (tmux/config.ts).
+	// so they may share a combo with an app-level shortcut.
 	//
 	// Platform-split on purpose. `Mod` is ⌘ on macOS, where the shell wants none of
 	// it — but Ctrl elsewhere, where ⌘D/⌘W/⌘T would land as ^D (end-of-file), ^W
@@ -284,6 +283,34 @@ export const APP_SHORTCUTS: ShortcutSpec[] = [
 	{
 		id: "pane-swap-next", category: "terminal", conflictGroup: "terminal", descKey: "panes.swapNext",
 		primary: [{ code: "Period", mods: ["Mod", "Shift"], platform: "mac" }, { code: "Period", mods: ["Ctrl", "Shift"], platform: "other" }],
+	},
+	// ⌘⌥+arrows is iTerm2's pane navigation; off macOS the same keys read Ctrl+Alt,
+	// which no shell treats as a control character. The ⌥⇧+arrows alias mirrors
+	// tmux's prefix-free binding, so native tasks get it too — and it is what the
+	// browser keeps, since ⌘⌥←/→ is Chrome's tab switch on macOS.
+	{
+		id: "pane-focus-left", category: "terminal", conflictGroup: "terminal", descKey: "panes.focusLeft",
+		primary: [{ code: "ArrowLeft", mods: ["Mod", "Alt"], platform: "mac", desktopOnly: true }, { code: "ArrowLeft", mods: ["Ctrl", "Alt"], platform: "other" }],
+		alias: [{ code: "ArrowLeft", mods: ["Alt", "Shift"] }],
+	},
+	{
+		id: "pane-focus-right", category: "terminal", conflictGroup: "terminal", descKey: "panes.focusRight",
+		primary: [{ code: "ArrowRight", mods: ["Mod", "Alt"], platform: "mac", desktopOnly: true }, { code: "ArrowRight", mods: ["Ctrl", "Alt"], platform: "other" }],
+		alias: [{ code: "ArrowRight", mods: ["Alt", "Shift"] }],
+	},
+	{
+		id: "pane-focus-up", category: "terminal", conflictGroup: "terminal", descKey: "panes.focusUp",
+		primary: [mod("ArrowUp", "Alt")], alias: [{ code: "ArrowUp", mods: ["Alt", "Shift"] }],
+	},
+	{
+		id: "pane-focus-down", category: "terminal", conflictGroup: "terminal", descKey: "panes.focusDown",
+		primary: [mod("ArrowDown", "Alt")], alias: [{ code: "ArrowDown", mods: ["Alt", "Shift"] }],
+	},
+	// Types tmux's ⌃B prefix, so it can live on a ⌘ key tmux itself can never see.
+	// Terminal-scoped: rebound to ⌘A it stays Select All in every text field.
+	{
+		id: "tmux-prefix", category: "terminal", conflictGroup: "terminal", descKey: "tmux.prefixDesc",
+		primary: [{ code: "KeyB", mods: ["Mod"], platform: "mac" }, { code: "KeyB", mods: ["Ctrl", "Shift"], platform: "other" }],
 	},
 	{
 		id: "tmux-new-window", category: "terminal", conflictGroup: "terminal", descKey: "cheatSheet.newWindow",
@@ -352,11 +379,14 @@ export function shortcutKeysFor(spec: ShortcutSpec, mac: boolean = isMac()): str
  * the browser owns are dropped from the rendered list.
  */
 export function shortcutKeysForMode(spec: ShortcutSpec, mac: boolean, remote: boolean): string {
-	if (remote && spec.remoteDisplay) return mac ? spec.remoteDisplay.mac : spec.remoteDisplay.other;
+	const remoteText = remote && spec.remoteDisplay ? (mac ? spec.remoteDisplay.mac : spec.remoteDisplay.other) : null;
+	// The alternative describes the defaults; a user's own combo fires in the browser.
+	if (remoteText && !hasOverride(spec.id)) return remoteText;
 	const bindings = bindingsFor(spec).filter(
 		(b) => (!b.platform || (b.platform === "mac") === mac) && !(remote && b.desktopOnly),
 	);
 	if (bindings.length > 0) return formatBindings(bindings, mac);
+	if (remoteText) return remoteText;
 	return spec.display ? (mac ? spec.display.mac : spec.display.other) : "";
 }
 
