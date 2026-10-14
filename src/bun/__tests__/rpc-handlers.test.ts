@@ -10839,6 +10839,124 @@ describe("resumeTaskSession — the Resume Session path dev3 agent resume reuses
 	});
 });
 
+describe("resumeTask gives every Claude pane its own conversation (#1950)", () => {
+	const WORKTREE = "/tmp/resume-multi-wt";
+	const STORE = `${process.env.HOME}/.claude/projects/${claudeEncodePath(WORKTREE)}`;
+	const MAIN = "00000000-0000-4000-8000-00000000a001";
+	const NEWEST = "00000000-0000-4000-8000-00000000a002";
+	const claudePane = (sessionId: string) =>
+		({ agentCmd: "claude", sessionId, agentId: "builtin-claude", configId: "claude-default" });
+
+	/** Transcripts newest first: `files[0]` has the latest mtime. */
+	function seedStore(files: string[]): void {
+		(readdirSync as any).mockImplementation((dir: string) => (String(dir) === STORE ? files.map((id) => `${id}.jsonl`) : []));
+		(existsSync as any).mockImplementation(() => true);
+		(statSync as any).mockImplementation((path: string) => {
+			const rank = files.findIndex((id) => String(path).endsWith(`${id}.jsonl`));
+			return { isDirectory: () => true, isFile: () => true, mode: 0o755, size: 0, mtimeMs: rank === -1 ? 0 : 1_000 - rank };
+		});
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		const task = makeTask({
+			worktreePath: WORKTREE,
+			sessionState: { panes: [claudePane(MAIN), claudePane("dead-pane-1"), claudePane("dead-pane-2")] },
+		});
+		(data.loadProjects as any).mockResolvedValue([makeProject()]);
+		(data.loadVirtualProjects as any).mockResolvedValue([]);
+		(data.getTask as any).mockResolvedValue(task);
+		(pty.hasSession as any).mockReturnValue(false);
+		(pty.getPtyPort as any).mockReturnValue(9999);
+		vi.mocked(pty.tmuxSessionExists).mockResolvedValue(true);
+		vi.mocked(pty.splitAndRunCommand).mockResolvedValueOnce("%2").mockResolvedValueOnce("%3");
+	});
+
+	afterEach(() => {
+		(readdirSync as any).mockImplementation(() => []);
+		(existsSync as any).mockImplementation(() => true);
+		(statSync as any).mockImplementation(() => ({ isDirectory: () => true, isFile: () => true, mode: 0o755, size: 0 }));
+	});
+
+	it("resumes each pane's own conversation and starts a pane that has none fresh", async () => {
+		// The old per-pane healing sent both dead panes to NEWEST, i.e. pane 1's conversation.
+		seedStore([NEWEST, MAIN]);
+		(data.getTask as any).mockResolvedValue(makeTask({
+			worktreePath: WORKTREE,
+			sessionState: { panes: [claudePane(MAIN), claudePane(NEWEST), claudePane("never-prompted")] },
+		}));
+
+		await handlers.resumeTask({ taskId: "task-1" });
+
+		const options = (agents.resolveCommandForAgent as any).mock.calls.map((call: any[]) => call[3]);
+		expect(options[0]).toMatchObject({ resume: true, sessionId: MAIN });
+		expect(options[1]).toMatchObject({ resume: true, sessionId: NEWEST });
+		// `--continue` here would reopen the newest conversation a second time.
+		expect(options[2].resume).toBeUndefined();
+		expect(options[2].sessionId).toMatch(/^[0-9a-f-]{36}$/);
+		expect([MAIN, NEWEST]).not.toContain(options[2].sessionId);
+	});
+
+	it("reports a pane that started over as `fresh-session`, and resumes it for the CLI too", async () => {
+		// `dev3 agent resume` refuses `agent-latest` because the harness would pick
+		// somebody's conversation; this pane is handed one dev3 minted, so it is safe.
+		const { resumeTaskSession } = await import("../rpc-handlers/tmux-pty");
+		seedStore([NEWEST, MAIN]);
+		(data.getTask as any).mockResolvedValue(makeTask({
+			worktreePath: WORKTREE,
+			sessionState: { panes: [claudePane(MAIN), claudePane(NEWEST), claudePane("never-prompted")] },
+		}));
+
+		const outcome = await resumeTaskSession("task-1", { requireSessionIds: true });
+
+		expect(outcome).toMatchObject({ kind: "resumed", result: { panes: [
+			expect.objectContaining({ index: 0, mode: "exact", sessionId: MAIN }),
+			expect.objectContaining({ index: 1, mode: "exact", sessionId: NEWEST }),
+			expect.objectContaining({ index: 2, mode: "fresh-session", storedSessionId: "never-prompted", status: "resumed" }),
+		] } });
+		const minted = (agents.resolveCommandForAgent as any).mock.calls[2][3].sessionId;
+		expect((outcome as { result: { panes: { sessionId: string | null }[] } }).result.panes[2].sessionId).toBe(minted);
+	});
+
+	it("starts a main pane with nothing of its own on a new conversation, without the brief", async () => {
+		// Its `--continue` would open NEWEST, which pane 1 is resuming at the same time.
+		const { resumeTaskSession } = await import("../rpc-handlers/tmux-pty");
+		seedStore([NEWEST]);
+		(data.getTask as any).mockResolvedValue(makeTask({
+			worktreePath: WORKTREE,
+			description: "the original brief",
+			// The third pane uses up the second split id beforeEach queued.
+			sessionState: { panes: [claudePane("never-prompted-main"), claudePane(NEWEST), claudePane("never-prompted-extra")] },
+		}));
+
+		const outcome = await resumeTaskSession("task-1", { requireSessionIds: true });
+
+		const [mainCall] = (agents.resolveCommandForAgent as any).mock.calls;
+		expect(mainCall[3].resume).toBeUndefined();
+		expect(mainCall[3].sessionId).toMatch(/^[0-9a-f-]{36}$/);
+		expect(mainCall[3].sessionId).not.toBe(NEWEST);
+		expect(mainCall[2].taskDescription).toBe("");
+		expect(outcome).toMatchObject({ kind: "resumed", result: { panes: [
+			expect.objectContaining({ index: 0, mode: "fresh-session", sessionId: mainCall[3].sessionId }),
+			expect.objectContaining({ index: 1, mode: "exact", sessionId: NEWEST }),
+			expect.objectContaining({ index: 2, mode: "fresh-session" }),
+		] } });
+		const persisted = (data.updateTask as any).mock.calls.find((call: any[]) => call[2]?.sessionState)[2];
+		expect(persisted.sessionState.panes[0].sessionId).toBe(mainCall[3].sessionId);
+	});
+
+	it("persists the id each extra pane actually resumed", async () => {
+		seedStore([NEWEST, MAIN]);
+
+		await handlers.resumeTask({ taskId: "task-1" });
+
+		const fresh = (agents.resolveCommandForAgent as any).mock.calls[1][3].sessionId;
+		const fresh2 = (agents.resolveCommandForAgent as any).mock.calls[2][3].sessionId;
+		const last = (data.updateTask as any).mock.calls.filter((call: any[]) => call[2]?.sessionState).at(-1)[2];
+		expect(last.sessionState.panes.slice(1).map((p: any) => [p.paneId, p.sessionId])).toEqual([["%2", fresh], ["%3", fresh2]]);
+	});
+});
+
 describe("restartTask (start fresh) floors the Codex scan", () => {
 	beforeEach(() => vi.clearAllMocks());
 

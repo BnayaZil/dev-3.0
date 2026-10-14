@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listResumableSessionIds, resolveResumableSessionId } from "../agent-transcripts";
+import { listResumableSessionIds, resolveResumableSessionIds } from "../agent-transcripts";
 import { claudeEncodePath } from "../../shared/conversation-search-core";
 
 const WORKTREE = "/Users/dev/.dev3.0/ops/operations/7d8312c0/work";
@@ -47,13 +47,24 @@ afterEach(() => {
 	rmSync(home, { recursive: true, force: true });
 });
 
-describe("resolveResumableSessionId", () => {
+/** Resolve a single main pane — the one-pane task every older caller had. */
+function resolveOne(agentCmd: string, sessionId: string | null, originCwd?: string) {
+	return resolveResumableSessionIds(WORKTREE, [{ agentCmd, sessionId, sessionOriginCwd: originCwd, adoptsOrphan: true }], home)[0];
+}
+
+/** A main pane followed by extra panes, as resumeTask passes them. */
+function claudePanes(...sessionIds: (string | null)[]) {
+	return sessionIds.map((sessionId, i) => ({ agentCmd: "claude", sessionId, adoptsOrphan: i === 0 }));
+}
+
+describe("resolveResumableSessionIds — one pane", () => {
 	it("keeps a stored id that still has a transcript", () => {
 		seedTranscript("1160218f-85f5-4a45-8032-ced3af5a532b", 0);
 
-		expect(resolveResumableSessionId("claude", WORKTREE, "1160218f-85f5-4a45-8032-ced3af5a532b", home)).toEqual({
+		expect(resolveOne("claude", "1160218f-85f5-4a45-8032-ced3af5a532b")).toEqual({
 			sessionId: "1160218f-85f5-4a45-8032-ced3af5a532b",
 			substituted: false,
+			startFresh: false,
 			verified: true,
 		});
 	});
@@ -64,28 +75,32 @@ describe("resolveResumableSessionId", () => {
 		seedTranscript("1160218f-85f5-4a45-8032-ced3af5a532b", 0);
 		seedTranscript("aefa0626-853c-49c9-97bf-bd0e88ed89e7", 3600);
 
-		expect(resolveResumableSessionId("claude", WORKTREE, "125a4c8c-b567-4d24-991b-8732e82878c8", home)).toEqual({
+		expect(resolveOne("claude", "125a4c8c-b567-4d24-991b-8732e82878c8")).toEqual({
 			sessionId: "1160218f-85f5-4a45-8032-ced3af5a532b",
 			substituted: true,
+			startFresh: false,
 			verified: true,
 		});
 	});
 
-	it("drops a dead id to agent-latest when the store holds no transcripts", () => {
+	it("has nothing to resume when the store holds no transcripts", () => {
 		mkdirSync(transcriptDir(), { recursive: true });
 
-		expect(resolveResumableSessionId("claude", WORKTREE, "125a4c8c-b567-4d24-991b-8732e82878c8", home)).toEqual({
+		expect(resolveOne("claude", "125a4c8c-b567-4d24-991b-8732e82878c8")).toEqual({
 			sessionId: null,
 			substituted: true,
+			// Nothing to collide with, so the main pane keeps the agent's own latest.
+			startFresh: false,
 			verified: false,
 		});
 	});
 
 	it("passes the stored id through untouched when the store dir does not exist", () => {
 		// Unverifiable — a missing dir must never downgrade a resume that would work.
-		expect(resolveResumableSessionId("claude", WORKTREE, "125a4c8c-b567-4d24-991b-8732e82878c8", home)).toEqual({
+		expect(resolveOne("claude", "125a4c8c-b567-4d24-991b-8732e82878c8")).toEqual({
 			sessionId: "125a4c8c-b567-4d24-991b-8732e82878c8",
 			substituted: false,
+			startFresh: false,
 			verified: false,
 		});
 	});
@@ -93,20 +108,24 @@ describe("resolveResumableSessionId", () => {
 	it("passes the stored id through for agents with no filename-keyed store", () => {
 		seedTranscript("1160218f-85f5-4a45-8032-ced3af5a532b", 0);
 
-		expect(resolveResumableSessionId("codex", WORKTREE, "some-codex-session", home)).toEqual({
+		expect(resolveOne("codex", "some-codex-session")).toEqual({
 			sessionId: "some-codex-session",
 			substituted: false,
+			startFresh: false,
 			verified: false,
 		});
 	});
 
-	it("leaves a null stored id alone so the agent picks its own latest", () => {
+	it("gives a pane with no stored id the newest transcript, as the agent's own latest would", () => {
 		seedTranscript("1160218f-85f5-4a45-8032-ced3af5a532b", 0);
 
-		expect(resolveResumableSessionId("claude", WORKTREE, null, home)).toEqual({
-			sessionId: null,
-			substituted: false,
-			verified: false,
+		// Verified, unlike the `--continue` this replaces: the transcript was read off
+		// disk. Still dev3's guess, so it must not report as the pane's own (`exact`).
+		expect(resolveOne("claude", null)).toEqual({
+			sessionId: "1160218f-85f5-4a45-8032-ced3af5a532b",
+			substituted: true,
+			startFresh: false,
+			verified: true,
 		});
 	});
 
@@ -118,9 +137,7 @@ describe("resolveResumableSessionId", () => {
 		seedEmptyWorktreeStore();
 		seedTranscriptFor(origin, "elsewhere-1");
 
-		expect(
-			resolveResumableSessionId("claude", WORKTREE, "elsewhere-1", home, undefined, origin),
-		).toEqual({ sessionId: "elsewhere-1", substituted: false, verified: true });
+		expect(resolveOne("claude", "elsewhere-1", origin)).toEqual({ sessionId: "elsewhere-1", substituted: false, startFresh: false, verified: true });
 	});
 
 	it("does not let a later local session hijack an id from the origin store", () => {
@@ -128,18 +145,91 @@ describe("resolveResumableSessionId", () => {
 		seedTranscript("local-session", 10);
 		seedTranscriptFor(origin, "elsewhere-1");
 
-		expect(
-			resolveResumableSessionId("claude", WORKTREE, "elsewhere-1", home, undefined, origin),
-		).toEqual({ sessionId: "elsewhere-1", substituted: false, verified: true });
+		expect(resolveOne("claude", "elsewhere-1", origin)).toEqual({ sessionId: "elsewhere-1", substituted: false, startFresh: false, verified: true });
+	});
+
+	it("keeps an id whose conversation lives in another directory's store, origin unrecorded", () => {
+		// An in-session `/resume` can switch the pane to such a conversation, and
+		// nothing records where it lives.
+		seedTranscript("local-session", 0);
+		seedTranscriptFor("/Users/dev/code/other-checkout", "resumed-elsewhere");
+
+		expect(resolveOne("claude", "resumed-elsewhere")).toEqual({ sessionId: "resumed-elsewhere", substituted: false, startFresh: false, verified: true });
 	});
 
 	it("still heals when the origin store has lost the conversation too", () => {
 		seedTranscript("survivor", 10);
 		seedEmptyWorktreeStore();
 
-		expect(
-			resolveResumableSessionId("claude", WORKTREE, "gone", home, undefined, "/Users/dev/code/my-app"),
-		).toEqual({ sessionId: "survivor", substituted: true, verified: true });
+		expect(resolveOne("claude", "gone", "/Users/dev/code/my-app")).toEqual({ sessionId: "survivor", substituted: true, startFresh: false, verified: true });
+	});
+});
+
+describe("resolveResumableSessionIds — several panes (#1950)", () => {
+	it("never hands two stale panes the same newest transcript", () => {
+		// Healing each pane on its own gave every stale pane "newest", so they
+		// reopened one conversation side by side.
+		seedTranscript("pane-a", 30);
+		seedTranscript("newest", 0);
+
+		const targets = resolveResumableSessionIds(WORKTREE, claudePanes("dead-main", "pane-a", "dead-extra"), home);
+
+		expect(targets.map((t) => t.sessionId)).toEqual(["newest", "pane-a", null]);
+		expect(targets[2].startFresh).toBe(true);
+	});
+
+	it("lets a pane keep its own conversation even when it is not the newest one", () => {
+		seedTranscript("pane-a", 0);
+		seedTranscript("pane-b", 600);
+
+		const targets = resolveResumableSessionIds(WORKTREE, claudePanes("dead", "pane-b"), home);
+
+		// The stale main pane must not take pane-b's conversation just because it comes first.
+		expect(targets.map((t) => t.sessionId)).toEqual(["pane-a", "pane-b"]);
+		expect(targets[1].substituted).toBe(false);
+	});
+
+	it("starts a never-prompted extra pane fresh rather than adopting an abandoned conversation", () => {
+		// "pre-clear" is what a `/clear` left behind in another pane; reopening it
+		// here would show this pane a conversation it never had.
+		seedTranscript("main", 30);
+		seedTranscript("pre-clear", 0);
+
+		const targets = resolveResumableSessionIds(WORKTREE, claudePanes("main", "never-prompted"), home);
+
+		expect(targets[1]).toEqual({ sessionId: null, substituted: true, startFresh: true, verified: false });
+	});
+
+	it("starts the main pane fresh too when every transcript belongs to another pane", () => {
+		// A never-prompted main pane beside a prompted extra one: `--continue` here
+		// would reopen pane-a's conversation in two panes at once.
+		seedTranscript("pane-a", 0);
+
+		const targets = resolveResumableSessionIds(WORKTREE, claudePanes("never-prompted-main", "pane-a"), home);
+
+		expect(targets[0]).toEqual({ sessionId: null, substituted: true, startFresh: true, verified: false });
+		expect(targets[1].sessionId).toBe("pane-a");
+	});
+
+	it("splits panes that already collapsed onto one id", () => {
+		// The old bug persisted the shared id, so both panes now point at one live transcript.
+		seedTranscript("shared", 0);
+
+		const targets = resolveResumableSessionIds(WORKTREE, claudePanes("shared", "shared"), home);
+
+		expect(targets.map((t) => t.sessionId)).toEqual(["shared", null]);
+		expect(targets[1].startFresh).toBe(true);
+	});
+
+	it("leaves panes of an unverifiable agent out of the claims", () => {
+		seedTranscript("pane-a", 0);
+
+		const targets = resolveResumableSessionIds(WORKTREE, [
+			{ agentCmd: "codex", sessionId: "codex-rollout", adoptsOrphan: true },
+			{ agentCmd: "claude", sessionId: "pane-a" },
+		], home);
+
+		expect(targets.map((t) => t.sessionId)).toEqual(["codex-rollout", "pane-a"]);
 	});
 });
 
