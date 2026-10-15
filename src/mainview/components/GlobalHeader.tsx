@@ -52,6 +52,7 @@ import {
 	RemoteQRIcon,
 	AgentTrafficIcon,
 	StatsIcon,
+	SessionsIcon,
 	GitHubIcon,
 	ReportBugIcon,
 	ChangelogIcon,
@@ -422,6 +423,7 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 	);
 
 	const currentProjectId = "projectId" in route ? route.projectId : null;
+	const openSessions = () => navigate(currentProjectId ? { screen: "sessions", scopeProjectId: currentProjectId } : { screen: "sessions" });
 	const sensitiveProjectIds = new Set(projects.filter((p) => p.sensitive).map((p) => p.id));
 	// ---- The space level of the trail, and the way up to it ----
 	// The space the user came THROUGH rides on the route (board and task routes
@@ -537,6 +539,9 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 		// A global screen, so the tail names it and nothing claims a project — the
 		// route's scope seed is a filter on the screen, not a location.
 		segments.push({ label: t("traffic.label") });
+	} else if (route.screen === "sessions") {
+		// Same as traffic: the scope project is a filter on the screen, not a location.
+		segments.push({ label: t("sessions.title") });
 	} else if (route.screen === "gauge-demo") {
 		segments.push({ label: t("gaugeDemo.title") });
 	} else if (route.screen === "native-pane-layout-lab") {
@@ -737,6 +742,9 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 					label: t("header.remoteAccessLabel"),
 					run: () => { void openRemoteAccess(); },
 				},
+				// The strip inside the usage sheet links here too, but only once sessions exist;
+				// the screen is a destination, so the sheet carries a row for it like Changelog.
+				...(route.screen !== "sessions" ? [{ key: "sessions", label: t("sessions.title"), run: openSessions }] : []),
 				...(route.screen !== "changelog" ? [{ key: "changelog", label: t("header.changelogLabel"), run: () => navigate({ screen: "changelog" }) }] : []),
 				{ key: "website", label: t("header.githubLabel"), run: () => window.open("https://h0x91b.github.io/dev-3.0/", "_blank") },
 				{ key: "report", label: t("header.reportLabel"), run: () => window.open("https://github.com/h0x91b/dev-3.0/issues", "_blank") },
@@ -1211,6 +1219,19 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 										<span className="text-sm">{t("header.statsLabel")}</span>
 									</button>
 								)}
+								{route.screen !== "sessions" && (
+									<button
+										role="menuitem"
+										onClick={() => {
+											setShowOverflowMenu(false);
+											openSessions();
+										}}
+										className="header-anim w-full text-left px-3 py-2 flex items-center gap-2.5 text-fg-2 hover:bg-elevated hover:text-fg transition-colors"
+									>
+										<SessionsIcon className="w-[1.125rem] h-[1.125rem] flex-shrink-0" />
+										<span className="text-sm">{t("sessions.title")}</span>
+									</button>
+								)}
 								<button
 									role="menuitem"
 									onClick={() => {
@@ -1305,7 +1326,7 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 
 				{/* Ambient agent rate-limit indicator — hidden until any limit data exists
 				    (folded into the kebab bottom sheet on narrow). */}
-				{!isNarrow && <RateLimitIndicator compact={compact} projectId={currentProjectId} />}
+				{!isNarrow && <RateLimitIndicator compact={compact} projectId={currentProjectId} onOpenSessions={openSessions} />}
 
 				{/* Quick Shell lives in the overflow menu at every width — it is a
 				    keyboard action (⌘⇧`) far more than a button. */}
@@ -1481,7 +1502,14 @@ function GlobalHeader({ route, projects, tasks, agents, navigate, goBack, goForw
 						<PreventSleepToggle />
 						<MemoryHeadroomIndicator navigate={navigate} />
 						{viewedOverRemote && <ConnectionQualityIndicator />}
-						<RateLimitIndicator compact={false} projectId={currentProjectId} />
+						<RateLimitIndicator
+							compact={false}
+							projectId={currentProjectId}
+							onOpenSessions={() => {
+								setShowActionSheet(false);
+								openSessions();
+							}}
+						/>
 						{currentProjectId && !isVirtualProject && (
 							<GitPullButton projectId={currentProjectId} compact={false} />
 						)}

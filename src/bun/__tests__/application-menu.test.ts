@@ -77,6 +77,15 @@ describe("buildApplicationMenu", () => {
 		expect(actionable[3].accelerator).toBeUndefined();
 	});
 
+	it("lists the Agent Sessions screen in View, routed to the palette's view-sessions action", () => {
+		const menu = buildApplicationMenu({ hasTask: false, hasProject: false, hasTerminal: false }) as AnyMenuItem[];
+		expect(findItemByAction(findLabeledMenu(menu, "View")?.submenu ?? [], MENU_ACTIONS.viewSessions)).toMatchObject({
+			label: "Show Agent Sessions",
+			action: "view-sessions",
+			enabled: true,
+		});
+	});
+
 	it("leaves Ctrl+- available for route history instead of native zoom-out", () => {
 		const menu = buildApplicationMenu() as AnyMenuItem[];
 		const zoomOut = findItemByAction(menu, MENU_ACTIONS.zoomOut);

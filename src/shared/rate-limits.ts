@@ -17,6 +17,8 @@
  *   locally authenticated `codex app-server`; this is cached and optional.
  */
 
+import type { AgentSessionStats } from "./session-stats";
+
 export type RateLimitSource = "claude" | "codex";
 
 export interface RateLimitWindow {
@@ -74,6 +76,8 @@ export interface AgentRateLimitSnapshot {
 
 export interface AgentRateLimitsReport {
 	snapshots: AgentRateLimitSnapshot[];
+	/** Recent Claude sessions of live tasks, newest first. */
+	sessions?: AgentSessionStats[];
 	generatedAt: number;
 }
 

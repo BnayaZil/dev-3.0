@@ -211,6 +211,20 @@ export function StatsIcon({ className }: HeaderIconProps) {
 	);
 }
 
+// 14b — Agent sessions: three session rows, their live dots pulsing in turn.
+export function SessionsIcon({ className }: HeaderIconProps) {
+	return (
+		<svg {...svgBase(className)}>
+			<path d="M9 6h11" />
+			<path d="M9 12h11" />
+			<path d="M9 18h11" />
+			<circle cx="4.5" cy="6" r="1.5" className="hdr hdr-sess1" />
+			<circle cx="4.5" cy="12" r="1.5" className="hdr hdr-sess2" />
+			<circle cx="4.5" cy="18" r="1.5" className="hdr hdr-sess3" />
+		</svg>
+	);
+}
+
 // 15 — GitHub: the octocat takes a polite little bow. Brand mark — shape kept.
 export function GitHubIcon({ className }: HeaderIconProps) {
 	return (

@@ -1398,6 +1398,26 @@ describe("GlobalHeader — compact layout", () => {
 		expect(screen.getByText("Change Log")).toBeInTheDocument();
 	});
 
+	it("opens Agent sessions from the kebab, scoped to the current project", async () => {
+		mockMatchMedia(false);
+		const user = userEvent.setup();
+		const navigate = vi.fn();
+		renderHeader({ screen: "project", projectId: "p1" }, [project1, project2], navigate);
+		await user.click(screen.getByLabelText("More"));
+		await user.click(screen.getByRole("menuitem", { name: "Agent sessions" }));
+		expect(navigate).toHaveBeenCalledWith({ screen: "sessions", scopeProjectId: "p1" });
+	});
+
+	it("carries an Agent sessions row in the narrow sheet", async () => {
+		mockMatchMedia(true);
+		const user = userEvent.setup();
+		const navigate = vi.fn();
+		renderHeader({ screen: "dashboard" }, [project1, project2], navigate);
+		await user.click(screen.getByLabelText("More"));
+		await user.click(screen.getByText("Agent sessions"));
+		expect(navigate).toHaveBeenCalledWith({ screen: "sessions" });
+	});
+
 	it("keeps prevent-sleep out of the roomy header bar and inside the kebab menu", async () => {
 		mockMatchMedia(false);
 		mockedApi.request.getPreventSleepState.mockResolvedValue({
