@@ -10,6 +10,9 @@ import {
 	codexAccountIdForHome,
 	completeClaudeLogin,
 	completeCodexLogin,
+	discardStagedLogin,
+	STAGED_LOGIN_MARKER,
+	sweepAbandonedStagedLogins,
 	getActiveClaudeConfigDir,
 	getActiveClaudeSessionEnv,
 	getActiveCodexSessionEnv,
@@ -19,18 +22,50 @@ import {
 	listAgentAccounts,
 	prepareClaudeLogin,
 	prepareCodexLogin,
+	LoginNotReadyError,
 	registeredOutputStyleName,
 	removeAgentAccount,
 	renameAgentAccount,
 	setActiveClaudeAccount,
 	setActiveCodexAccount,
+	stagedLoginHasIdentity,
 	updateClaudeApiProfile,
+	claudeAuthStatusMismatch,
+	parseClaudeAuthStatus,
 	type AccountPaths,
+	type ClaudeAuthStatusProbe,
 } from "../agent-accounts";
 import { claudeApiProfileEnvKeys, ENV_UNSET } from "../../shared/agent-accounts";
 
 let root: string;
 let paths: AccountPaths;
+
+/** Synthetic `claude auth status`: exactly the fields the 2.1.x binary prints for a
+ *  subscription login (no `apiKeySource` — it only appears with a key source). */
+function confirmedStatus(email: string, over: Record<string, unknown> = {}, exitCode = 0): ClaudeAuthStatusProbe {
+	return async (configDir) => ({
+		exitCode,
+		stdout: JSON.stringify(
+			{
+				loggedIn: true,
+				authMethod: "claude.ai",
+				apiProvider: "firstParty",
+				analyticsDisabled: false,
+				projectsDirectory: join(configDir, "projects"),
+				configDirectory: configDir,
+				email,
+				orgId: "org-uuid",
+				orgName: null,
+				subscriptionType: "max",
+				...over,
+			},
+			null,
+			2,
+		),
+	});
+}
+
+const unavailableStatus: ClaudeAuthStatusProbe = async () => null;
 
 function makeJwt(payload: Record<string, unknown>): string {
 	const b64url = (obj: unknown) =>
@@ -249,23 +284,136 @@ describe("claude login flow", () => {
 	it("complete fails before the login happened", async () => {
 		seedClaudeLogin();
 		const { accountId } = await prepareClaudeLogin(paths);
-		await expect(completeClaudeLogin(accountId, paths)).rejects.toThrow(/Login not detected/);
+		await expect(completeClaudeLogin(accountId, paths, unavailableStatus)).rejects.toThrow(/Login not detected/);
 	});
 
-	it("complete registers the account once identity + credentials exist", async () => {
+	it("before the login lands, complete says not-ready (keep watching) rather than failing", async () => {
 		seedClaudeLogin();
 		const { accountId } = await prepareClaudeLogin(paths);
+		const probe = vi.fn(unavailableStatus);
+		await expect(completeClaudeLogin(accountId, paths, probe)).rejects.toBeInstanceOf(LoginNotReadyError);
+		// No identity yet → the provider CLI is not even started.
+		expect(probe).not.toHaveBeenCalled();
+		expect(stagedLoginHasIdentity("claude", accountId, paths)).toBe(false);
+	});
+
+	it("prepare hands a launch scoped by env to its own dir, and pre-trusts that dir", async () => {
+		seedClaudeLogin();
+		const { accountId, launch } = await prepareClaudeLogin(paths);
+		const dir = claudeAccountDir(accountId, paths);
+		expect(launch).toEqual({ command: "claude", args: ["/login"], env: { CLAUDE_CONFIG_DIR: dir }, cwd: dir });
+		const seeded = JSON.parse(readFileSync(join(dir, ".claude.json"), "utf-8"));
+		expect(seeded.projects[dir].hasTrustDialogAccepted).toBe(true);
+	});
+
+	it("sweeps only marked, unregistered staged dirs older than the TTL", async () => {
+		seedClaudeLogin();
+		const stale = await prepareClaudeLogin(paths);
+		const fresh = await prepareClaudeLogin(paths);
+		const saved = await prepareClaudeLogin(paths);
+		const savedDir = claudeAccountDir(saved.accountId, paths);
+		writeFileSync(join(savedDir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "s@example.com", accountUuid: "claude-acc-s" } }));
+		await completeClaudeLogin(saved.accountId, paths, confirmedStatus("s@example.com"));
+		expect(existsSync(join(savedDir, STAGED_LOGIN_MARKER))).toBe(false);
+		// A dir from an older build has no marker: never ours to judge.
+		const legacy = claudeAccountDir("legacy-unmarked", paths);
+		mkdirSync(legacy, { recursive: true });
+		const staleDir = claudeAccountDir(stale.accountId, paths);
+		writeFileSync(join(staleDir, STAGED_LOGIN_MARKER), JSON.stringify({ createdAt: Date.now() - 60 * 60_000 }));
+
+		expect(sweepAbandonedStagedLogins("claude", 20 * 60_000, Date.now(), paths)).toBe(1);
+		expect(existsSync(staleDir)).toBe(false);
+		expect(existsSync(claudeAccountDir(fresh.accountId, paths))).toBe(true);
+		expect(existsSync(savedDir)).toBe(true);
+		expect(existsSync(legacy)).toBe(true);
+	});
+
+	it("discardStagedLogin deletes an unverified dir but refuses a saved account", async () => {
+		seedClaudeLogin();
+		const staged = await prepareClaudeLogin(paths);
+		expect(discardStagedLogin("claude", staged.accountId, paths)).toBe(true);
+		expect(existsSync(claudeAccountDir(staged.accountId, paths))).toBe(false);
+
+		const saved = await prepareClaudeLogin(paths);
+		const dir = claudeAccountDir(saved.accountId, paths);
+		writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "second@example.com", accountUuid: "claude-acc-2" } }));
+		writeFileSync(join(dir, ".credentials.json"), "{}");
+		expect(stagedLoginHasIdentity("claude", saved.accountId, paths)).toBe(true);
+		await completeClaudeLogin(saved.accountId, paths, confirmedStatus("second@example.com"));
+		expect(discardStagedLogin("claude", saved.accountId, paths)).toBe(false);
+		expect(existsSync(join(dir, ".credentials.json"))).toBe(true);
+	});
+
+	it("complete registers only when the provider's auth status confirms this dir and account", async () => {
+		seedClaudeLogin();
+		const { accountId, launch } = await prepareClaudeLogin(paths);
 		const dir = claudeAccountDir(accountId, paths);
 		writeFileSync(
 			join(dir, ".claude.json"),
 			JSON.stringify({ oauthAccount: { emailAddress: "second@example.com", accountUuid: "claude-acc-2" } }),
 		);
-		writeFileSync(join(dir, ".credentials.json"), "{}");
 
-		const account = await completeClaudeLogin(accountId, paths);
+		const account = await completeClaudeLogin(accountId, paths, confirmedStatus("second@example.com"));
 		expect(account.label).toBe("second@example.com");
 		const state = await listAgentAccounts(paths);
 		expect(state.claude.accounts.map((a) => a.id)).toContain(accountId);
+		// The dir a launch injects is the very dir the login ran in (Claude keys its Keychain item by it).
+		await setActiveClaudeAccount(accountId, paths);
+		expect(await getActiveClaudeConfigDir(undefined, paths)).toBe(launch.env.CLAUDE_CONFIG_DIR);
+	});
+
+	it("REGRESSION: a new login never gets the system login's credentials copied in", async () => {
+		seedClaudeLogin();
+		writeFileSync(join(paths.claudeHome, ".credentials.json"), JSON.stringify({ marker: "SYSTEM-ACCOUNT-TOKEN" }));
+		const { accountId } = await prepareClaudeLogin(paths);
+		const dir = claudeAccountDir(accountId, paths);
+		writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "new@example.com", accountUuid: "claude-acc-new" } }));
+
+		await expect(completeClaudeLogin(accountId, paths, unavailableStatus)).rejects.toMatchObject({ reason: "status-unavailable" });
+		expect(existsSync(join(dir, ".credentials.json"))).toBe(false);
+
+		await completeClaudeLogin(accountId, paths, confirmedStatus("new@example.com"));
+		expect(existsSync(join(dir, ".credentials.json"))).toBe(false);
+	});
+
+	it("identity alone never registers: every status that does not match stays pending", async () => {
+		seedClaudeLogin();
+		const { accountId } = await prepareClaudeLogin(paths);
+		const dir = claudeAccountDir(accountId, paths);
+		writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "new@example.com", accountUuid: "claude-acc-new" } }));
+		const notReady = { reason: "status-mismatch" };
+		const cases: ClaudeAuthStatusProbe[] = [
+			confirmedStatus("new@example.com", { loggedIn: false, authMethod: "none" }, 1),
+			// An env key makes Claude Code report loggedIn with no /login at all.
+			confirmedStatus("new@example.com", { authMethod: "api_key", apiKeySource: "ANTHROPIC_API_KEY", email: undefined }),
+			confirmedStatus("new@example.com", { authMethod: "api_key_helper" }),
+			confirmedStatus("new@example.com", { apiProvider: "bedrock", authMethod: "third_party" }),
+			confirmedStatus("new@example.com", { configDirectory: paths.claudeHome }),
+			confirmedStatus("other@example.com"),
+		];
+		for (const probe of cases) {
+			await expect(completeClaudeLogin(accountId, paths, probe)).rejects.toMatchObject(notReady);
+		}
+		await expect(completeClaudeLogin(accountId, paths, async () => ({ exitCode: 0, stdout: "not json" }))).rejects.toMatchObject({ reason: "status-unavailable" });
+		expect((await listAgentAccounts(paths)).claude.accounts).toHaveLength(0);
+	});
+
+	it("a Console login is accepted only with the key /login itself manages", () => {
+		const status = { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty", apiKeySource: "/login managed key", configDirectory: "/d", email: "c@example.com" };
+		expect(claudeAuthStatusMismatch(status, 0, "/d", "c@example.com")).toBeNull();
+		expect(claudeAuthStatusMismatch({ ...status, apiKeySource: "ANTHROPIC_API_KEY" }, 0, "/d", "c@example.com")).not.toBeNull();
+		expect(parseClaudeAuthStatus("warning: x\n{\"loggedIn\":true}\n")).toEqual({ loggedIn: true });
+	});
+
+	it("a cancel that lands during the status probe registers nothing", async () => {
+		seedClaudeLogin();
+		const { accountId } = await prepareClaudeLogin(paths);
+		const dir = claudeAccountDir(accountId, paths);
+		writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "new@example.com", accountUuid: "claude-acc-new" } }));
+		await expect(
+			completeClaudeLogin(accountId, paths, confirmedStatus("new@example.com"), { stillWanted: () => false }),
+		).rejects.toThrow(/closed/);
+		expect((await listAgentAccounts(paths)).claude.accounts).toHaveLength(0);
 	});
 
 	it("complete rejects a login that duplicates an existing account", async () => {
@@ -279,8 +427,7 @@ describe("claude login flow", () => {
 				oauthAccount: { emailAddress: "main@example.com", organizationName: "Org", accountUuid: "claude-acc-1" },
 			}),
 		);
-		writeFileSync(join(dir, ".credentials.json"), "{}");
-		await expect(completeClaudeLogin(accountId, paths)).rejects.toThrow(/already added/);
+		await expect(completeClaudeLogin(accountId, paths, confirmedStatus("main@example.com"))).rejects.toThrow(/already added/);
 	});
 
 	it("allows the same login in a different organization and disambiguates the label", async () => {
@@ -296,9 +443,8 @@ describe("claude login flow", () => {
 				oauthAccount: { emailAddress: "main@example.com", organizationName: "Org B", accountUuid: "claude-acc-1" },
 			}),
 		);
-		writeFileSync(join(dir, ".credentials.json"), "{}");
 
-		const account = await completeClaudeLogin(accountId, paths);
+		const account = await completeClaudeLogin(accountId, paths, confirmedStatus("main@example.com"));
 		expect(account.label).toBe("main@example.com (Org B)");
 		const state = await listAgentAccounts(paths);
 		expect(state.claude.accounts).toHaveLength(2);
@@ -378,6 +524,18 @@ describe("codex accounts", () => {
 			// Not registered until verified — the user's ~/.codex is untouched.
 			const state = await listAgentAccounts(paths);
 			expect(state.codex.accounts).toHaveLength(0);
+		} finally {
+			if (prevHeadless === undefined) delete process.env.DEV3_HEADLESS;
+			else process.env.DEV3_HEADLESS = prevHeadless;
+		}
+	});
+
+	it("prepareCodexLogin uses device auth when the viewer is remote, even on a desktop host", async () => {
+		const prevHeadless = process.env.DEV3_HEADLESS;
+		delete process.env.DEV3_HEADLESS;
+		try {
+			const { accountId, launch } = await prepareCodexLogin(paths, { deviceAuth: true });
+			expect(launch).toEqual({ command: "codex", args: ["login", "--device-auth"], env: { CODEX_HOME: codexAccountDir(accountId, paths) }, cwd: codexAccountDir(accountId, paths) });
 		} finally {
 			if (prevHeadless === undefined) delete process.env.DEV3_HEADLESS;
 			else process.env.DEV3_HEADLESS = prevHeadless;
@@ -792,7 +950,7 @@ describe("remove / rename", () => {
 
 	it("completeClaudeLogin rejects path-traversal account ids", async () => {
 		seedClaudeLogin();
-		await expect(completeClaudeLogin("../../.claude", paths)).rejects.toThrow(/Invalid account id/);
+		await expect(completeClaudeLogin("../../.claude", paths, unavailableStatus)).rejects.toThrow(/Invalid account id/);
 	});
 
 	it("rename updates the label", async () => {
