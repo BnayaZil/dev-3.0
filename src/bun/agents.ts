@@ -24,8 +24,11 @@ import { loadSettings, saveSettings } from "./settings";
 import { getCodexProfileForCurrentUiTheme, getCodexThemeForCurrentUiTheme } from "./theme-state";
 import { ensureClaudeStatusLineSettings } from "./rate-limit-monitor";
 import { ensureAgentSystemPromptFile } from "./agent-system-prompt-file";
-import { getActiveClaudeConfigDir, getActiveClaudeSessionEnv, getActiveCodexSessionEnv, listClaudeAccountDirs } from "./agent-accounts";
+import { getActiveClaudeConfigDir, getActiveClaudeSessionEnv, getActiveCodexSessionEnv, getActiveOmpSessionEnv, listClaudeAccountDirs } from "./agent-accounts";
 import { ENV_UNSET, claudeModelFamily } from "../shared/agent-accounts";
+import { hasOmpFlag } from "../shared/agent-adapters/omp-flags";
+import { findAgentConfig } from "../shared/agent-live-models";
+import { ompDefaultsArgs } from "./omp-launch-defaults";
 export { claudeModelFamily } from "../shared/agent-accounts";
 import { codexModelCatalogArgs, modelRolesForAgent, orphanedRoleBindings, resolveModelRoleLaunch, roleUnsetEnv } from "../shared/model-catalog";
 import { writeCodexModelCatalog } from "./codex-model-catalog";
@@ -252,7 +255,7 @@ function mergeAgentWithDefault(
  *  to warrant a one-time resync of already-onboarded users' stored order
  *  (mergeWithDefaults otherwise preserves stored order forever). See
  *  decisions/ for the write-up. */
-export const AGENTS_LAYOUT_REVISION = 15;
+export const AGENTS_LAYOUT_REVISION = 16;
 
 /** One-time reorder of each built-in agent's configurations to match the
  *  current DEFAULT_AGENTS declared order. Custom (non-default) configs are
@@ -281,6 +284,25 @@ export function applyLayoutResync(agents: CodingAgent[]): CodingAgent[] {
 		}
 
 		return { ...agent, configurations: reordered };
+	});
+}
+
+/** Agent defaults dev3 once shipped and has since replaced. `defaultConfigId`
+ *  survives every merge, so the new default reaches an existing install only
+ *  through this, run once with the layout resync: an install still on the old
+ *  shipped value moves, and a later pick of it by the user is never undone. */
+const RETIRED_AGENT_DEFAULT_CONFIG: Record<string, readonly string[]> = {
+	// omp's default became Bypass (auto-approve) on 2026-10-16.
+	"builtin-omp": ["omp-default"],
+};
+
+export function migrateRetiredAgentDefaults(agents: CodingAgent[]): CodingAgent[] {
+	const defAgentById = new Map(DEFAULT_AGENTS.map((a) => [a.id, a]));
+	return agents.map((agent) => {
+		const def = defAgentById.get(agent.id);
+		const retired = RETIRED_AGENT_DEFAULT_CONFIG[agent.id];
+		if (!def?.defaultConfigId || !retired || !agent.defaultConfigId || !retired.includes(agent.defaultConfigId)) return agent;
+		return { ...agent, defaultConfigId: def.defaultConfigId };
 	});
 }
 
@@ -361,7 +383,7 @@ export async function getAllAgents(): Promise<CodingAgent[]> {
 
 	// One-time resync: existing installs otherwise keep whatever stale order
 	// their configs happened to have from whenever they first ran, forever.
-	const resynced = applyLayoutResync(merged);
+	const resynced = migrateRetiredAgentDefaults(applyLayoutResync(merged));
 	await saveAgents(resynced);
 	await saveSettings({ ...settings, agentsLayoutRevision: AGENTS_LAYOUT_REVISION });
 	return resynced;
@@ -678,7 +700,7 @@ export function findConfig(
 		agent.configurations.find((c) => c.id === agent.defaultConfigId) ||
 		agent.configurations[0];
 	if (!configId) return fallback();
-	const exact = agent.configurations.find((c) => c.id === configId);
+	const exact = findAgentConfig(agent, configId);
 	if (exact) return exact;
 	// A removed preset id (e.g. "claude-bypass-sonnet") must land on its documented
 	// successor, never on whatever happens to sit first in the list.
@@ -790,6 +812,47 @@ async function applyCodexAccountEnv(
 	}
 }
 
+/** Inject the selected omp account's PI_CODING_AGENT_DIR (its own agent.db and
+ *  sessions). Same rules as Codex: an explicit value in the config's envVars
+ *  wins, and only new sessions are affected. */
+async function applyOmpAccountEnv(
+	baseCmd: string,
+	extraEnv: Record<string, string>,
+	accountId?: string | null,
+	family?: AgentFamily,
+): Promise<void> {
+	if (agentKey(baseCmd, family) !== "omp" || extraEnv.PI_CODING_AGENT_DIR) return;
+	try {
+		const accountEnv = await getActiveOmpSessionEnv(accountId);
+		for (const [key, value] of Object.entries(accountEnv)) {
+			if (!(key in extraEnv)) extraEnv[key] = value;
+		}
+	} catch (err) {
+		log.warn("Failed to resolve active omp account env", { error: String(err) });
+	}
+}
+
+/** Prepend omp's dev3 defaults (`--config` overlay, see omp-launch-defaults.ts)
+ *  for whatever the user's own omp config leaves unset. Never fails a launch. */
+function withOmpLaunchDefaults(
+	config: AgentConfiguration | undefined,
+	baseCmd: string,
+	extraEnv: Record<string, string>,
+	worktreePath: string,
+	family?: AgentFamily,
+): AgentConfiguration | undefined {
+	if (agentKey(baseCmd, family) !== "omp" || hasOmpFlag(config?.additionalArgs, "--config")) return config;
+	try {
+		const agentDir = extraEnv.PI_CODING_AGENT_DIR === ENV_UNSET ? undefined : extraEnv.PI_CODING_AGENT_DIR;
+		const args = ompDefaultsArgs({ agentDir, worktreePath });
+		if (args.length === 0) return config;
+		return { ...(config ?? { id: "", name: "" }), additionalArgs: [...args, ...(config?.additionalArgs ?? [])] };
+	} catch (err) {
+		log.warn("Failed to apply omp launch defaults", { error: String(err) });
+		return config;
+	}
+}
+
 /** Rewrite a Claude preset's `--model` flag to the active API profile's override.
  *  Claude Code gives the CLI flag precedence over env, and dev3 presets pass
  *  concrete model ids — so without rewriting the flag, an API profile's per-slot
@@ -889,8 +952,12 @@ export async function resolveCommandForAgent(
 	}
 	await applyClaudeAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 	await applyCodexAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
+	await applyOmpAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 	const routed = await applyModelRoleLaunch(baseCmd, config, extraEnv, providerOpts, agentWithPath.agentFamily);
-	const launchConfig = resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel);
+	const launchConfig = withOmpLaunchDefaults(
+		resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel),
+		baseCmd, extraEnv, ctx.worktreePath, agentWithPath.agentFamily,
+	);
 	const command = await resolveAgentCommand(agentWithPath, launchConfig, ctx, routed.options);
 	// `agent` stays the stored record — callers derive the base command from it,
 	// and swapping in the override path there would change what they persist.
@@ -1020,8 +1087,12 @@ export async function resolveCommandForProject(
 		};
 		await applyClaudeAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 		await applyCodexAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
+		await applyOmpAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 		const routed = await applyModelRoleLaunch(baseCmd, config, extraEnv, providerOpts, agentWithPath.agentFamily);
-		const launchConfig = resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel);
+		const launchConfig = withOmpLaunchDefaults(
+			resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel),
+			baseCmd, extraEnv, ctx.worktreePath, agentWithPath.agentFamily,
+		);
 		const command = await resolveAgentCommand(agentWithPath, launchConfig, ctx, routed.options);
 		return {
 			command,
