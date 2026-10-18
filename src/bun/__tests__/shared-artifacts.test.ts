@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -25,7 +25,9 @@ import {
 	saveSharedArtifact,
 	sharedArtifactDownloadKind,
 	sharedArtifactHtmlPath,
+	sharedArtifactLinkScope,
 } from "../shared-artifacts";
+import { mintFileLink, resolveFileLinkPath } from "../file-links";
 
 afterAll(() => {
 	rmSync(TEST_HOME, { recursive: true, force: true });
@@ -382,6 +384,50 @@ describe("stored artifact read boundary", () => {
 		expect(sharedArtifactHtmlPath(saved)).toBe(saved.storedPath);
 		rmSync(saved.storedPath, { force: true });
 		expect(() => sharedArtifactHtmlPath(saved)).toThrow(SharedArtifactError);
+	});
+});
+
+describe("sharedArtifactLinkScope", () => {
+	function savedReport() {
+		const dir = join(SRC_DIR, "linked");
+		mkdirSync(join(dir, "img"), { recursive: true });
+		writeFileSync(join(dir, "index.html"), '<!doctype html><img src="img/chart.png">');
+		writeFileSync(join(dir, "img", "chart.png"), "PNGDATA");
+		return saveSharedArtifact("/tmp/proj", join(dir, "index.html"), [join(dir, "img", "chart.png")]);
+	}
+
+	it("covers the stored folder, so the page's relative asset references resolve", () => {
+		const saved = savedReport();
+		const link = mintFileLink(sharedArtifactLinkScope(saved));
+		const asset = resolveFileLinkPath(link.replace(/[^/]+$/, "img/chart.png"));
+		expect(asset).not.toBeNull();
+		expect(readFileSync(asset!, "utf8")).toBe("PNGDATA");
+	});
+
+	it("resolves a stored path spelled with .. segments, or every asset would 404", () => {
+		const saved = savedReport();
+		const dir = dirname(saved.storedPath);
+		mkdirSync(join(dir, "x"), { recursive: true });
+		const scope = sharedArtifactLinkScope({ ...saved, storedPath: `${dir}/x/../${basename(saved.storedPath)}` });
+		expect(scope).toEqual({ kind: "dir", root: realpathSync(dir), entry: basename(saved.storedPath) });
+	});
+
+	it("refuses any folder that is not an artifact's own <slug>/shared-artifacts/<uuid>/ dir", () => {
+		const saved = savedReport();
+		const store = dirname(dirname(saved.storedPath));
+		writeFileSync(join(dirname(saved.storedPath), "master.key"), "SECRET");
+		expect(() => sharedArtifactLinkScope({ ...saved, storedPath: join(dirname(saved.storedPath), "master.key") })).toThrow(SharedArtifactError);
+		const decoys = [join(store, "not-a-uuid"), join(dirname(saved.storedPath), "nested"), join(dirname(store), "task", "worktree", "shared-artifacts", "keys")];
+		for (const dir of decoys) {
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "master.key"), "SECRET");
+			expect(() => sharedArtifactLinkScope({ ...saved, storedPath: join(dir, "master.key") })).toThrow(SharedArtifactError);
+		}
+	});
+
+	it("refuses a record whose stored path escapes the artifact store", () => {
+		const forged = { ...artifact("forged"), storedPath: `${TEST_HOME}/worktrees/x/shared-artifacts/id/../../../../secret.txt` };
+		expect(() => sharedArtifactLinkScope(forged)).toThrow(SharedArtifactError);
 	});
 });
 
