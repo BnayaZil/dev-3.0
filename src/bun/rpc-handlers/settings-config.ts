@@ -135,6 +135,9 @@ async function updateProjectSettings(params: { projectId: string } & ProjectSett
 		...(params.githubAuthHost !== undefined ? { githubAuthHost: params.githubAuthHost } : {}),
 		...(params.githubAuthLogin !== undefined ? { githubAuthLogin: params.githubAuthLogin } : {}),
 		...(params.sensitive !== undefined ? { sensitive: params.sensitive } : {}),
+		...(params.autoAccountExclusions !== undefined
+			? { autoAccountExclusions: normalizeAccountExclusions(params.autoAccountExclusions) }
+			: {}),
 		// A blank prompt is how the UI clears the override: dropped from the
 		// record so the global setting takes over again.
 		...(params.reviewModePrompt !== undefined
@@ -308,6 +311,8 @@ async function saveGlobalSettings(params: GlobalSettings): Promise<void> {
 		}),
 		simplifiedModeSource: stored.simplifiedModeSource,
 		analyticsDistinctId: stored.analyticsDistinctId ?? params.analyticsDistinctId,
+		// Written only by the account surfaces' Auto row, after the snapshot was taken.
+		autoAccountDefault: stored.autoAccountDefault,
 	};
 	await saveSettings(next);
 	await noteInterfaceModeChange(stored.simplifiedMode === true, next.simplifiedMode === true, stored.simplifiedModeSource === "fresh");
@@ -819,3 +824,9 @@ export const settingsConfigHandlers = {
 	setAgentBinaryPath,
 	setTmuxTheme,
 };
+
+function normalizeAccountExclusions(raw: unknown): string[] | undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const ids = [...new Set(raw.filter((v): v is string => typeof v === "string" && v.length > 0))];
+	return ids.length ? ids : undefined;
+}
