@@ -24,7 +24,7 @@ import { loadSettings, saveSettings } from "./settings";
 import { getCodexProfileForCurrentUiTheme, getCodexThemeForCurrentUiTheme } from "./theme-state";
 import { ensureClaudeStatusLineSettings } from "./rate-limit-monitor";
 import { ensureAgentSystemPromptFile } from "./agent-system-prompt-file";
-import { getActiveClaudeConfigDir, getActiveClaudeSessionEnv, getActiveCodexSessionEnv, getActiveOmpSessionEnv, listClaudeAccountDirs } from "./agent-accounts";
+import { getActiveClaudeConfigDir, getActiveClaudeSessionEnv, getActiveAgentDirSessionEnv, getActiveCodexSessionEnv, listClaudeAccountDirs } from "./agent-accounts";
 import { ENV_UNSET, claudeModelFamily } from "../shared/agent-accounts";
 import { hasOmpFlag } from "../shared/agent-adapters/omp-flags";
 import { findAgentConfig } from "../shared/agent-live-models";
@@ -594,8 +594,8 @@ export async function resolveAgentCommand(
  * appears as an ordinary word in that prose matches every running agent, so one
  * agent's routine cleanup SIGTERMed all of its siblings (#1734).
  *
- * Claude (`--append-system-prompt-file`) and omp (`--append-system-prompt`,
- * which reads a file when the value names one) have such a flag. Codex delivers
+ * Claude (`--append-system-prompt-file`), omp and pi (`--append-system-prompt`,
+ * which both read a file when the value names one) have such a flag. Codex delivers
  * the body through `-c developer_instructions=…` and the rest concatenate it
  * onto the prompt, so on Windows those launches are still over the ceiling — a
  * separate per-agent channel, not something this function can paper over.
@@ -603,7 +603,7 @@ export async function resolveAgentCommand(
  * A failed write throws rather than falling back to the inline body: that
  * fallback is the argv exposure being closed.
  */
-const SYSTEM_PROMPT_FILE_COMMANDS = new Set(["claude", "omp"]);
+const SYSTEM_PROMPT_FILE_COMMANDS = new Set(["claude", "omp", "pi"]);
 
 function systemPromptFileFor(adapter: { command: string; skillBody?: string }): string | undefined {
 	if (!SYSTEM_PROMPT_FILE_COMMANDS.has(adapter.command) || !adapter.skillBody) return undefined;
@@ -812,23 +812,24 @@ async function applyCodexAccountEnv(
 	}
 }
 
-/** Inject the selected omp account's PI_CODING_AGENT_DIR (its own agent.db and
- *  sessions). Same rules as Codex: an explicit value in the config's envVars
- *  wins, and only new sessions are affected. */
-async function applyOmpAccountEnv(
+/** Inject the selected omp or pi account's PI_CODING_AGENT_DIR (its own
+ *  credentials and sessions). Same rules as Codex: an explicit value in the
+ *  config's envVars wins, and only new sessions are affected. */
+async function applyAgentDirAccountEnv(
 	baseCmd: string,
 	extraEnv: Record<string, string>,
 	accountId?: string | null,
 	family?: AgentFamily,
 ): Promise<void> {
-	if (agentKey(baseCmd, family) !== "omp" || extraEnv.PI_CODING_AGENT_DIR) return;
+	const kind = agentKey(baseCmd, family);
+	if ((kind !== "omp" && kind !== "pi") || extraEnv.PI_CODING_AGENT_DIR) return;
 	try {
-		const accountEnv = await getActiveOmpSessionEnv(accountId);
+		const accountEnv = await getActiveAgentDirSessionEnv(kind, accountId);
 		for (const [key, value] of Object.entries(accountEnv)) {
 			if (!(key in extraEnv)) extraEnv[key] = value;
 		}
 	} catch (err) {
-		log.warn("Failed to resolve active omp account env", { error: String(err) });
+		log.warn("Failed to resolve active agent-dir account env", { kind, error: String(err) });
 	}
 }
 
@@ -952,7 +953,7 @@ export async function resolveCommandForAgent(
 	}
 	await applyClaudeAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 	await applyCodexAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
-	await applyOmpAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
+	await applyAgentDirAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 	const routed = await applyModelRoleLaunch(baseCmd, config, extraEnv, providerOpts, agentWithPath.agentFamily);
 	const launchConfig = withOmpLaunchDefaults(
 		resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel),
@@ -1087,7 +1088,7 @@ export async function resolveCommandForProject(
 		};
 		await applyClaudeAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 		await applyCodexAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
-		await applyOmpAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
+		await applyAgentDirAccountEnv(baseCmd, extraEnv, options?.accountId, agentWithPath.agentFamily);
 		const routed = await applyModelRoleLaunch(baseCmd, config, extraEnv, providerOpts, agentWithPath.agentFamily);
 		const launchConfig = withOmpLaunchDefaults(
 			resolveLaunchConfig(routed.config, agentWithPath, baseCmd, extraEnv, routed.pinnedModel),

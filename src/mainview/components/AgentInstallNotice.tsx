@@ -36,17 +36,20 @@ interface AgentInstallNoticeProps {
 	/** Name of a harness that was missing and a recheck just found. */
 	installedNow: string | null;
 	onRecheck: () => void;
+	/** Applied to whatever the notice renders (it renders nothing when there is nothing to say). */
+	className?: string;
 }
 
 /** Inline availability notice under the launch picker: the install command for a
  *  missing harness, and the re-check that lifts the block once it is installed. */
-export default function AgentInstallNotice({ id, state, missing, installedNow, onRecheck }: AgentInstallNoticeProps) {
+export default function AgentInstallNotice({ id, state, missing, installedNow, onRecheck, className = "" }: AgentInstallNoticeProps) {
 	const t = useT();
-	const [copied, setCopied] = useState(false);
+	const [copied, setCopied] = useState<string | null>(null);
 	const checking = state === "checking";
 	const command = missing?.check.installCommand;
+	const alternative = missing?.check.alternativeInstallCommand;
 
-	useEffect(() => setCopied(false), [command]);
+	useEffect(() => setCopied(null), [command, alternative]);
 
 	// A sub-second probe would only flash a line and shift the dialog.
 	const [slowCheck, setSlowCheck] = useState(false);
@@ -56,10 +59,24 @@ export default function AgentInstallNotice({ id, state, missing, installedNow, o
 		return () => clearTimeout(id);
 	}, [checking]);
 
-	function copy() {
-		if (!command) return;
-		navigator.clipboard.writeText(command).then(() => setCopied(true), () => {});
+	function copy(text: string) {
+		navigator.clipboard.writeText(text).then(() => setCopied(text), () => {});
 	}
+
+	const commandRow = (text: string, testId: string) => (
+		<div className="flex items-center gap-2 min-w-0">
+			<code data-testid={testId} className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap text-warning-strong bg-warning/10 px-2 py-1 rounded text-xs font-mono select-all">
+				{text}
+			</code>
+			<button
+				type="button"
+				onClick={() => copy(text)}
+				className="text-xs font-medium px-2.5 py-1 rounded-lg border border-edge text-fg-2 hover:text-fg hover:bg-elevated whitespace-nowrap"
+			>
+				{copied === text ? t("launch.agentCopied") : t("launch.agentCopyInstall")}
+			</button>
+		</div>
+	);
 
 	const recheckButton = (
 		<button
@@ -76,25 +93,20 @@ export default function AgentInstallNotice({ id, state, missing, installedNow, o
 
 	if (missing) {
 		return (
-			<div id={id} data-testid="agent-install-notice" className="p-3 rounded-lg bg-warning/10 border border-warning/20 space-y-2">
+			<div id={id} data-testid="agent-install-notice" className={`p-3 rounded-lg bg-warning/10 border border-warning/20 space-y-2 ${className}`}>
 				<p className="text-warning-strong text-xs font-medium">
 					{t("launch.agentMissingTitle", { name: missing.agent.name })}. {t("launch.agentMissingBlocked")}
 				</p>
 				{command ? (
 					<>
 						<p className="text-fg-2 text-xs">{t("launch.agentMissingInstall")}</p>
-						<div className="flex items-center gap-2 min-w-0">
-							<code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap text-warning-strong bg-warning/10 px-2 py-1 rounded text-xs font-mono select-all">
-								{command}
-							</code>
-							<button
-								type="button"
-								onClick={copy}
-								className="text-xs font-medium px-2.5 py-1 rounded-lg border border-edge text-fg-2 hover:text-fg hover:bg-elevated whitespace-nowrap"
-							>
-								{copied ? t("launch.agentCopied") : t("launch.agentCopyInstall")}
-							</button>
-						</div>
+						{commandRow(command, "agent-install-command")}
+						{alternative ? (
+							<>
+								<p className="text-fg-3 text-xs">{t("launch.agentMissingInstallAlt")}</p>
+								{commandRow(alternative, "agent-install-alternative")}
+							</>
+						) : null}
 					</>
 				) : (
 					<p className="text-fg-2 text-xs">{t("launch.agentMissingNoCommand", { command: missing.check.baseCommand })}</p>
@@ -109,7 +121,7 @@ export default function AgentInstallNotice({ id, state, missing, installedNow, o
 
 	if (state === "unknown") {
 		return (
-			<div id={id} data-testid="agent-install-unknown" className="flex flex-wrap items-center justify-between gap-2 text-xs text-fg-3">
+			<div id={id} data-testid="agent-install-unknown" className={`flex flex-wrap items-center justify-between gap-2 text-xs text-fg-3 ${className}`}>
 				<p>{t("launch.agentCheckUnknown")}</p>
 				{recheckButton}
 			</div>
@@ -117,11 +129,11 @@ export default function AgentInstallNotice({ id, state, missing, installedNow, o
 	}
 
 	if (checking) {
-		return slowCheck ? <p role="status" aria-live="polite" className="text-xs text-fg-3">{t("launch.agentChecking")}</p> : null;
+		return slowCheck ? <p role="status" aria-live="polite" className={`text-xs text-fg-3 ${className}`}>{t("launch.agentChecking")}</p> : null;
 	}
 	if (!installedNow) return null;
 	return (
-		<p role="status" aria-live="polite" className="text-xs text-success-strong">
+		<p role="status" aria-live="polite" className={`text-xs text-success-strong ${className}`}>
 			✓ {t("launch.agentInstalledNow", { name: installedNow })}
 		</p>
 	);
