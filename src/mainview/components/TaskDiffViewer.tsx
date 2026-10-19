@@ -21,6 +21,7 @@ import Tooltip from "./Tooltip";
 import { useResolvedTheme } from "../hooks/useResolvedTheme";
 import { useNarrowViewport } from "../hooks/useNarrowViewport";
 import { formatBytes } from "../utils/formatBytes";
+import { anchorScrollRegion } from "../utils/scroll-anchor";
 import BottomSheet from "./BottomSheet";
 import { CAROUSEL_MAX_WIDTH } from "./MobileBoardCarousel";
 import { resolveAutoDiffViewMode, resolveDiffViewMode } from "./global-settings/utils";
@@ -1587,6 +1588,7 @@ function TaskDiffFileSection({
 			}}
 			className={`border border-edge rounded-xl ${isRead ? "bg-elevated" : "bg-raised"}`}
 			data-file-id={file.id}
+			data-scroll-anchor-pending={expanded && !showMdPreview && !buildError && !diffFile ? "" : undefined}
 		>
 			{/* Its own query container: what squeezes this row is the pane, not the
 			    window — a phone viewport can hold a full-width diff, while a desktop
@@ -1868,6 +1870,7 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 	const resolvedTheme = useResolvedTheme();
 	const toolbarRef = useRef<HTMLDivElement | null>(null);
 	const scrollRegionRef = useRef<HTMLDivElement | null>(null);
+	const scrollAnchorRef = useRef<ReturnType<typeof anchorScrollRegion> | null>(null);
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 	const fileButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -2322,6 +2325,14 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 		}
 	}, [currentRequest.focusFile, importLegacyReview, payload, task.id]);
 
+	useEffect(() => {
+		const region = scrollRegionRef.current;
+		if (!region) return;
+		const handle = anchorScrollRegion(region, "[data-file-id]");
+		scrollAnchorRef.current = handle;
+		return () => handle.dispose();
+	}, []);
+
 	// Scroll spy: as the user scrolls the diff, highlight the file whose section is currently
 	// under the reading line (just below the sticky toolbar). rAF-throttled; only commits a
 	// state change when the active file actually changes.
@@ -2709,6 +2720,7 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 			top: Math.max(0, scrollRegion.scrollTop + offset),
 			behavior,
 		});
+		scrollAnchorRef.current?.reanchor();
 
 		if (retriesLeft <= 0) {
 			pendingScrollFrameRef.current = null;
@@ -2752,6 +2764,7 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 						behavior: "smooth",
 						block: "start",
 					});
+					scrollAnchorRef.current?.reanchor();
 					pendingCommentScrollFrameRef.current = null;
 					return;
 				}
@@ -2808,6 +2821,7 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 					behavior: "smooth",
 					block: "center",
 				});
+				scrollAnchorRef.current?.reanchor();
 				pendingSearchScrollFrameRef.current = null;
 				return;
 			}
@@ -3969,7 +3983,7 @@ function TaskDiffViewer({ task, project, request, onBack, navigationGuardRef }: 
 					</BottomSheet>
 				)}
 
-				<div ref={scrollRegionRef} className="flex-1 min-w-0 overflow-auto px-4 pt-1 pb-4" data-testid="inline-diff-scroll-region">
+				<div ref={scrollRegionRef} className="flex-1 min-w-0 overflow-auto px-4 pt-1 pb-4 [overflow-anchor:none]" data-testid="inline-diff-scroll-region">
 				{narrow && (
 					/* Sheds, never stacks (bible §12.6). Four mode chips plus the tests
 					   toggle wrapped into a second row on a phone; the modes are now one
