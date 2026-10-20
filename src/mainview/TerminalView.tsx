@@ -6,6 +6,7 @@ import { toast } from "./toast";
 import { api, isElectrobun } from "./rpc";
 import { getTerminalKeyOverride } from "./terminal-key-overrides";
 import { pasteIntoTerminal, terminalBracketsPaste } from "./terminal-paste";
+import { inputTypesText, keyTypesText } from "./terminal-history-input";
 import { debugLog } from "./debug-log";
 import SharedSizeNotice from "./components/SharedSizeNotice";
 import {
@@ -142,20 +143,7 @@ function proposeDimensionsWithoutScrollbarReserve(
 	return { cols, rows };
 }
 
-/**
- * Build the two-stage resize-dance WebSocket messages that force tmux to
- * redraw on reconnect — including the same-size reconnect case where the
- * kernel would otherwise skip SIGWINCH.
- *
- * The nudge always targets **rows** (never columns) so the two paints
- * share column width and therefore produce identical text wrapping. A
- * column nudge makes every line re-wrap at a slightly narrower width and
- * then at the target width, which is visible as a "refresh / realign"
- * flicker on every task switch. See decision 041.
- *
- * Exported for unit testing — keeps the nudge axis pinned against
- * accidental refactors.
- */
+/** Explicit Hard Reset nudges the shell; ordinary redraws must not change geometry. */
 export function buildResizeDance(cols: number, rows: number): [string, string] {
 	const nudgeRows = rows + 1;
 	return [
@@ -375,6 +363,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 	// jump to live output. Remember when that mode may be active so the next
 	// plain click can return to live input without requiring Escape.
 	const tmuxCopyModeMayBeActiveRef = useRef(false);
+	const tmuxHistoryKeyboardRef = useRef(false);
 	// Scrolled-into-history signal for the host (touch scroll-to-latest button).
 	// tmux cannot tell us when a swipe reaching the bottom ended copy-mode, so
 	// while the flag is up we poll pane_in_mode and drop it when tmux did.
@@ -394,6 +383,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 	}, [stopCopyModePoll]);
 	const markTmuxCopyModeMayBeActive = useCallback(() => {
 		tmuxCopyModeMayBeActiveRef.current = true;
+		tmuxHistoryKeyboardRef.current = false;
 		// No host listening (pointer input) → no signal and no poll. The flag above
 		// still matters: it is what the desktop click-to-leave-copy-mode path reads.
 		if (!onScrolledIntoHistoryRef.current) return;
@@ -419,20 +409,54 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 		() => tmuxCopyModeMayBeActiveRef.current || copyModeExitRef.current !== null,
 		[],
 	);
-	/** Leave tmux copy-mode if a scroll may have entered it; resolves once tmux has been told. */
-	const exitCopyModeIfNeeded = useCallback((): Promise<void> => {
+	/**
+	 * Leave tmux copy-mode if a scroll may have entered it; resolves once tmux has been told.
+	 * `typedKey`: tmux keeps copy-mode-vi panes in history, where that key is a command.
+	 */
+	const exitCopyModeIfNeeded = useCallback((typedKey = false): Promise<void> => {
 		if (copyModeExitRef.current) return copyModeExitRef.current;
 		if (!tmuxCopyModeMayBeActiveRef.current) return Promise.resolve();
 		tmuxCopyModeMayBeActiveRef.current = false;
+		tmuxHistoryKeyboardRef.current = false;
 		setScrolledIntoHistory(false);
-		const pending = api.request.exitCopyModeAllPanes({ taskId })
-			.then(() => undefined)
+		const pending = api.request.exitCopyModeAllPanes(typedKey ? { taskId, typedKey } : { taskId })
+			.then(({ panesKept }) => {
+				if (!panesKept) return;
+				markTmuxCopyModeMayBeActive();
+				tmuxHistoryKeyboardRef.current = true;
+			})
 			// Best effort — the pane may already have returned to live input.
 			.catch(() => undefined)
 			.finally(() => { copyModeExitRef.current = null; });
 		copyModeExitRef.current = pending;
 		return pending;
-	}, [setScrolledIntoHistory, taskId]);
+	}, [markTmuxCopyModeMayBeActive, setScrolledIntoHistory, taskId]);
+	/**
+	 * Route one input against tmux copy-mode: typed text leaves history first, while cancel,
+	 * navigation and search input — and text after such a command — stays with tmux.
+	 */
+	const prepareInputForHistory = useCallback((typesText: boolean) => {
+		if (!copyModePending()) return;
+		if (!typesText) tmuxHistoryKeyboardRef.current = true;
+		// A history command may open a tmux search prompt that owns subsequent text.
+		else if (!tmuxHistoryKeyboardRef.current) void exitCopyModeIfNeeded(true);
+	}, [copyModePending, exitCopyModeIfNeeded]);
+	const sendUserInput = useCallback((data: string) => {
+		const send = () => {
+			if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(data);
+		};
+		prepareInputForHistory(inputTypesText(data));
+		if (copyModeExitRef.current) void copyModeExitRef.current.then(send);
+		else send();
+	}, [prepareInputForHistory]);
+	/** A dropped path or attachment always leaves history first, like a paste. */
+	const sendPlacedInput = useCallback((data: string) => {
+		const send = () => {
+			if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(data);
+		};
+		if (copyModePending()) void exitCopyModeIfNeeded().then(send);
+		else send();
+	}, [copyModePending, exitCopyModeIfNeeded]);
 	const mouseGestureDraggedRef = useRef(false);
 	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(
 		() => (document.documentElement.dataset.theme as "dark" | "light") || "dark",
@@ -620,9 +644,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			// 2. Send RIS (Reset to Initial State) to PTY/tmux
 			ws.send("\x1bc");
 
-			// 3. Force tmux redraw via resize nudge — use the same
-			//    row-nudge as the WS-open reconnect path so Hard Reset
-			//    doesn't introduce a column-re-wrap flicker.
+			// Explicit Hard Reset also nudges the shell; ordinary opens never do.
 			if (term) {
 				try {
 					// A follower's grid is the shared size; the server wants our own viewport.
@@ -1031,16 +1053,12 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 							// Direct input: space, digits, punctuation.
 							// Send immediately and prevent insertion into textarea
 							// so it doesn't desync with composition tracking.
-							if (wsRef.current?.readyState === WebSocket.OPEN) {
-								wsRef.current.send(ie.data);
-							}
+							sendUserInput(ie.data);
 							e.preventDefault();
 							return;
 						}
 						if (ie.inputType === "deleteContentBackward" && hiddenTextarea.value === "") {
-							if (wsRef.current?.readyState === WebSocket.OPEN) {
-								wsRef.current.send("\x7f");
-							}
+							sendUserInput("\x7f");
 							e.preventDefault();
 						}
 					});
@@ -1053,15 +1071,11 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 						const val = hiddenTextarea.value;
 						if (val.length > lastSentLen) {
 							const newChars = val.slice(lastSentLen);
-							if (wsRef.current?.readyState === WebSocket.OPEN) {
-								wsRef.current.send(newChars);
-							}
+							sendUserInput(newChars);
 						} else if (val.length < lastSentLen) {
 							const deleted = lastSentLen - val.length;
 							for (let i = 0; i < deleted; i++) {
-								if (wsRef.current?.readyState === WebSocket.OPEN) {
-									wsRef.current.send("\x7f");
-								}
+								sendUserInput("\x7f");
 							}
 						}
 						lastSentLen = val.length;
@@ -1314,13 +1328,21 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 				});
 			};
 			let refitScheduled = false;
+			let initialConnectPending = true;
 			function scheduleRefit() {
-				if (refitScheduled) return;
+				if (refitScheduled) {
+					if (!initialConnectPending) return;
+					clearTimeout(refitTimer!);
+				}
 				refitScheduled = true;
 				refitTimer = setTimeout(() => {
 					refitTimer = null;
 					refitScheduled = false;
 					refitToContainer();
+					if (initialConnectPending) {
+						initialConnectPending = false;
+						connectPty(term, fitAddon!);
+					}
 				}, 100);
 			}
 
@@ -1355,6 +1377,12 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 							// Replace sequences ghostty-web encodes wrongly or unhelpfully
 							// (see terminal-key-overrides.ts); onData keeps the latency probe fed.
 							term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+								// Let tmux consume history cancel/navigation keys before they can reach the agent.
+								if (tmuxStreamRef.current && !event.metaKey &&
+									!["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key) &&
+									!(event.ctrlKey && event.shiftKey && event.code === "KeyC")) {
+									prepareInputForHistory(keyTypesText(event));
+								}
 								const seq = getTerminalKeyOverride(event, tmuxStreamRef.current);
 								if (!seq) return false;
 								const hex = Array.from(seq, c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
@@ -1403,9 +1431,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 								},
 								sendInput: (data: string) => {
 									noteViewerActivity();
-									if (wsRef.current?.readyState === WebSocket.OPEN) {
-										wsRef.current.send(data);
-									}
+									sendUserInput(data);
 								},
 								// Bracketed per pasteIntoTerminal(), routed through onData → WS.
 								// Text typed while the pane sits in tmux copy-mode would be eaten as
@@ -1443,7 +1469,8 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 							});
 
 							debugLog("terminal", "[TerminalView] Terminal fitted, connecting PTY...");
-							connectPty(term, fitAddon!);
+							// Avoid sending the temporary size before task chrome settles.
+							scheduleRefit();
 						} catch (err) {
 							console.error("[TerminalView] Post-layout setup FAILED:", err);
 							console.error("[TerminalView] Error details:", {
@@ -1947,6 +1974,12 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			if (reset || cleaned) writeToTerminal(reset + cleaned, true);
 		}
 
+		function noteTmuxStream() {
+			// A remount can inherit copy-mode without a local wheel/drag gesture.
+			if (!tmuxStreamRef.current) tmuxCopyModeMayBeActiveRef.current = true;
+			tmuxStreamRef.current = true;
+		}
+
 		function connectPty(term: Terminal, fit: FitAddon) {
 			if (disposed || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 			if (reconnectTimer !== null) {
@@ -1995,15 +2028,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 				const dims = fit.proposeDimensions();
 				debugLog("terminal", "[TerminalView] Proposed dimensions:", dims);
 				if (dims) {
-					// See buildResizeDance() — row-nudge keeps text wrapping
-					// identical between the two paints. See decision 041.
-					const [nudge, correct] = buildResizeDance(dims.cols, dims.rows);
-					socket.send(nudge);
-					setTimeout(() => {
-						if (socket === ws && socket.readyState === WebSocket.OPEN) {
-							socket.send(correct);
-						}
-					}, 50);
+					socket.send(encodeResizeSequence(dims.cols, dims.rows));
 				}
 				// Connecting alone never takes the shared size: only a viewer the user
 				// is looking at right now does, and a backgrounded one opts out.
@@ -2029,7 +2054,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 							handleNativeFrame(native.header, native.payload);
 							return;
 						}
-						tmuxStreamRef.current = true;
+						noteTmuxStream();
 						const cleaned = event.data.replace(OSC52_RE, "");
 						if (cleaned) {
 							noteSocketBytes(cleaned.length);
@@ -2038,7 +2063,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 						}
 					} else {
 						// Binary data — decode, then write on the same path as text
-						tmuxStreamRef.current = true;
+						noteTmuxStream();
 						const str = new TextDecoder().decode(new Uint8Array(event.data));
 						if (str) {
 							noteSocketBytes(str.length);
@@ -2098,11 +2123,14 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 
 			if (!terminalInputBound) termSubs.push(
 				term.onData((data) => {
-					if (disposed) return;
-					if (ws?.readyState === WebSocket.OPEN) {
+					const send = () => {
+						if (disposed || ws?.readyState !== WebSocket.OPEN) return;
 						latency.noteInput(data);
 						ws.send(data);
-					}
+					};
+					// Only a key/paste starts cancellation; replies and mouse reports keep history.
+					if (copyModeExitRef.current) void copyModeExitRef.current.then(send);
+					else send();
 				}),
 				term.onResize(({ cols, rows }) => {
 					if (disposed) return;
@@ -2299,6 +2327,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			frame = requestAnimationFrame(sync);
 		};
 		const onWindowFocus = () => {
+			if (tmuxStreamRef.current) tmuxCopyModeMayBeActiveRef.current = true;
 			windowFocusedRef.current = true;
 			sync();
 		};
@@ -2333,15 +2362,17 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			if (e.key.length !== 1) return;
 			const term = termRef.current;
 			if (!term) return;
+			// onData holds the key until a copy-mode exit this starts has reached tmux.
+			if (tmuxStreamRef.current) prepareInputForHistory(keyTypesText(e));
 			try {
 				term.focus();
 				term.input(e.key, true);
-			} catch { return; /* disposed */ }
+			} catch { /* disposed */ }
 			e.preventDefault();
 		}
 		document.addEventListener("keydown", handleKeydown);
 		return () => document.removeEventListener("keydown", handleKeydown);
-	}, []);
+	}, [prepareInputForHistory]);
 
 	useEffect(() => {
 		function handleTerminalCopyShortcut(e: KeyboardEvent) {
@@ -2487,17 +2518,14 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 		};
 	}, [sendViewerSignal, noteViewerActivity]);
 
-	// When the page becomes visible again (e.g. user returns from another
-	// app or switches back to this tab), trigger a resize dance to force
-	// tmux to fully redraw. This fixes display glitches (row offsets,
-	// stuck/duplicated text) that accumulate while the terminal was hidden.
+	// Refresh a returning viewer without making inline agents reflow their history.
 	useEffect(() => {
 		function onVisibilityChange() {
 			if (document.hidden) {
 				sendViewerSignal("hidden");
 				return;
 			}
-			// Before the dance, so the PTY is already sized for us when it repaints.
+			// Before the size report, so the PTY is already sized for us when it repaints.
 			sendViewerSignal("active");
 			const ws = wsRef.current;
 			const term = termRef.current;
@@ -2508,13 +2536,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			try { dims = fit.proposeDimensions(); } catch { return; /* disposed */ }
 			if (!dims) return;
 
-			const [nudge, correct] = buildResizeDance(dims.cols, dims.rows);
-			ws.send(nudge);
-			setTimeout(() => {
-				if (ws.readyState === WebSocket.OPEN) {
-					ws.send(correct);
-				}
-			}, 50);
+			ws.send(encodeResizeSequence(dims.cols, dims.rows));
 		}
 
 		document.addEventListener("visibilitychange", onVisibilityChange);
@@ -2598,7 +2620,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 		function sendPathToPty(path: string) {
 			if (wsRef.current?.readyState === WebSocket.OPEN) {
 				const escaped = path.replace(/ /g, "\\ ");
-				wsRef.current.send(escaped);
+				sendPlacedInput(escaped);
 			}
 			try { termRef.current?.focus(); } catch { /* disposed */ }
 		}
@@ -2684,16 +2706,17 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 			if (!term) return;
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			try {
-				pasteIntoTerminal(term, normalizePastedText(text), tmuxStreamRef.current);
-			} catch {
-				// Terminal disposed mid-paste — nothing to do.
-			}
+			const paste = () => {
+				try { pasteIntoTerminal(term, normalizePastedText(text), tmuxStreamRef.current); }
+				catch { /* disposed mid-paste */ }
+			};
+			if (copyModePending()) void exitCopyModeIfNeeded().then(paste);
+			else paste();
 		}
 
 		container.addEventListener("paste", onPaste, { capture: true });
 		return () => container.removeEventListener("paste", onPaste, { capture: true });
-	}, [projectId, taskId, t]);
+	}, [projectId, taskId, t, copyModePending, exitCopyModeIfNeeded, sendPlacedInput]);
 
 	function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
 		e.preventDefault();
@@ -2729,7 +2752,7 @@ function TerminalView({ ptyUrl, taskId, projectId, onReady, onNativeStatus, onSe
 		if (wsRef.current?.readyState === WebSocket.OPEN) {
 			const cursor = termRef.current?.buffer?.active;
 			const line = cursor?.getLine?.((cursor.baseY ?? 0) + (cursor.cursorY ?? 0));
-			wsRef.current.send(spaceDroppedPaths(text, line, cursor?.cursorX ?? 0));
+			sendPlacedInput(spaceDroppedPaths(text, line, cursor?.cursorX ?? 0));
 		}
 		try { termRef.current?.focus(); } catch { /* disposed */ }
 	}
