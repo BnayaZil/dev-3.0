@@ -90,7 +90,8 @@ async function tickProject(project: Project): Promise<void> {
 	}
 }
 
-async function evaluateTask(project: Project, task: Task, now: number): Promise<void> {
+/** Exported for unit tests — the per-task revive decision. */
+export async function evaluateTask(project: Project, task: Task, now: number): Promise<void> {
 	if (await taskTerminalAlive(task)) {
 		await resetToWatching(project, task);
 		return;
