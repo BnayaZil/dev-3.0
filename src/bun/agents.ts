@@ -7,7 +7,7 @@ import { DEFAULT_AGENTS, DEPRECATED_DEFAULT_CONFIG_REMAP } from "../shared/types
 export { skillInvocationPrefix } from "../shared/types";
 import { buildProviderEnv, getProviderDefinition, providerOmitsModelFlag, providerPinnedModel } from "../shared/llm-provider";
 import { createLogger } from "./logger";
-import { backupUnparsableCodexConfig, joinLike as joinLikeHome, detectCodexProfileLaunchFlag, detectCodexVersion, resetCodexVersionProbe, resetCodexHelpProbe, ensureCodexConfig, ensureCodexProfileFiles, getCodexSyntaxForVersion, type CodexProfileLaunchFlag } from "./codex-config";
+import { backupUnparsableCodexConfig, joinLike as joinLikeHome, detectCodexProfileLaunchFlag, detectCodexVersion, resetCodexVersionProbe, resetCodexHelpProbe, ensureCodexConfig, ensureCodexProfileFiles, getCodexSyntaxForVersion, resolveCodexInstallRoots, type CodexProfileLaunchFlag } from "./codex-config";
 import { agentBinaryPathOverride } from "./executable";
 import { DEV3_HOME } from "./paths";
 // Writer and pruner share one path constant: whatever registers an entry must
@@ -1286,6 +1286,7 @@ export async function ensureCodexTrust(dirPath: string): Promise<void> {
 
 		const updated = ensureCodexConfig(content, worktreesPath, socketsPath, [worktreesPath, resolved], {
 			codexVersion,
+			codexInstallRoots: await resolveCodexInstallRoots(),
 		});
 		if (updated !== content) {
 			writeFileSync(CODEX_CONFIG, updated, "utf-8");

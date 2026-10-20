@@ -1,11 +1,15 @@
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { load } from "js-toml";
 import { buildCodexHooks, AGENT_STATUS_HOOK_EVENTS, mentionsDev3Cli } from "../shared/agent-hooks";
 import { type CliVersion, isCliVersionAtLeast, parseCliVersion } from "../shared/agent-model-cli-requirements";
 import type { HookCliDialect } from "../shared/dev3-cli-path";
 import { createLogger } from "./logger";
 import { spawn } from "./spawn";
+import { agentBinaryPathOverride } from "./executable";
+import { resolveBinaryPath } from "./rpc-handlers/shared-pure";
+import { loadSettings } from "./settings";
 import { DEV3_CODEX_DARK_PROFILE, DEV3_CODEX_LIGHT_PROFILE } from "./theme-state";
 
 const log = createLogger("codex-config");
@@ -61,6 +65,12 @@ interface CodexConfigOptions {
 	 * on. Production leaves it unset and gets the host's dialect.
 	 */
 	dialect?: HookCliDialect;
+	/**
+	 * Read roots of the Codex installation (see `codexInstallReadRoots`). When
+	 * set, dev3-managed `# dev3: codex install` lines in the dev3 filesystem
+	 * profile are reconciled to exactly this set. Unset leaves them untouched.
+	 */
+	codexInstallRoots?: string[];
 }
 
 type CodexVersion = CliVersion;
@@ -167,6 +177,83 @@ function dev3FilesystemLines(userHome: string, dev3Home: string): string[] {
 		`${tomlBasicString(joinLike(userHome, ".agents", "skills"))} = "read"`,
 		`${tomlBasicString(dev3Home)} = "write"`,
 	];
+}
+
+const CODEX_INSTALL_MARKER = "# dev3: codex install";
+
+function codexInstallLine(root: string): string {
+	return `${tomlBasicString(root)} = "read" ${CODEX_INSTALL_MARKER}`;
+}
+
+/**
+ * Directories the dev3 profile must read so Codex's sandbox helper can exec its
+ * own launcher: the dir of every link in the chain, plus the install root.
+ */
+export function codexInstallReadRoots(launcherPath: string): string[] {
+	try {
+		const links = [launcherPath];
+		let current = launcherPath;
+		for (let i = 0; i < 16 && lstatSync(current).isSymbolicLink(); i++) {
+			current = resolve(dirname(current), readlinkSync(current));
+			links.push(current);
+		}
+		const target = realpathSync(launcherPath);
+		const linkDirs = links.slice(0, -1).map((link) => dirname(link));
+		if (links.length === 1) return guardInstallRoots([dirname(launcherPath), dirname(target)]);
+		return guardInstallRoots([...linkDirs, installRootOf(links[links.length - 1], target)]);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Only the last link and the real file decide the root, so an intermediate link
+ * (`~/.local/bin` -> Homebrew `bin`) cannot widen it to a common ancestor.
+ */
+function installRootOf(lastLink: string, target: string): string {
+	const [a, b] = [lastLink, target].map((path) => {
+		const dir = dirname(path);
+		return (basename(dir) === "bin" ? dirname(dir) : dir).split("/");
+	});
+	const common: string[] = [];
+	for (let i = 0; i < a.length && i < b.length && a[i] === b[i]; i++) common.push(a[i]);
+	return common.join("/");
+}
+
+/** Drops roots that would expose far more than the install: `/`, top-level dirs, home and its ancestors, `~/.codex`. */
+function guardInstallRoots(roots: string[]): string[] {
+	const homes = new Set([homedir()]);
+	try { homes.add(realpathSync(homedir())); } catch { /* No home dir to compare. */ }
+	const tooWide = (root: string) =>
+		root.split("/").filter(Boolean).length < 2 ||
+		[...homes].some((home) => home === root || home.startsWith(`${root}/`) || root === join(home, ".codex"));
+	return [...new Set(roots)].filter((root) => !tooWide(root));
+}
+
+/** Drop managed install lines that are no longer wanted, add the missing ones. */
+function reconcileCodexInstallRoots(config: string, roots: string[]): string {
+	const header = `[permissions.${DEV3_CODEX_PROFILE}.filesystem]`;
+	const lines = config.split("\n");
+	const start = lines.findIndex((line) => line.trim() === header);
+	if (start === -1) return config;
+	let end = lines.findIndex((line, i) => i > start && line.trimStart().startsWith("["));
+	if (end === -1) end = lines.length;
+	const wanted = new Set(roots.map(codexInstallLine));
+	const isStale = (line: string) => line.trimEnd().endsWith(`= "read" ${CODEX_INSTALL_MARKER}`) && !wanted.has(line.trimEnd());
+	const kept = lines.slice(start + 1, end).filter((line) => !isStale(line));
+	let result = [...lines.slice(0, start + 1), ...kept, ...lines.slice(end)].join("\n");
+
+	let existing: Set<string>;
+	try {
+		existing = new Set(Object.keys((load(result) as CodexConfig).permissions?.[DEV3_CODEX_PROFILE]?.filesystem ?? {}));
+	} catch {
+		return config;
+	}
+	for (const root of roots) {
+		// An unmarked entry for the same path is the user's own; it stays as is.
+		if (!existing.has(root)) result = insertAfterSectionHeader(result, header, codexInstallLine(root));
+	}
+	return result;
 }
 
 /** A quoted TOML string whose content still looks like a native Windows path. */
@@ -748,6 +835,19 @@ async function probeCodex(flag: "--version" | "--help"): Promise<string | null> 
 }
 
 /**
+ * Codex install roots to grant; undefined (leave grants alone) off macOS or when
+ * no launcher resolves. An empty list still prunes the stale managed lines.
+ */
+export async function resolveCodexInstallRoots(platform: NodeJS.Platform = process.platform): Promise<string[] | undefined> {
+	if (platform !== "darwin") return undefined;
+	const settings = await loadSettings();
+	const override = agentBinaryPathOverride("builtin-codex", "codex", settings.agentBinaryPaths, settings.agentCustomBinaryPaths);
+	const launcher = resolveBinaryPath("codex", override).resolvedPath;
+	if (!launcher) return undefined;
+	return codexInstallReadRoots(launcher);
+}
+
+/**
  * Ensure the Codex config.toml has:
  * 1. The dev3 worktree project trusted
  * 2. A generic [permissions.workspace] fallback profile + default_permissions
@@ -851,6 +951,7 @@ export function ensureCodexConfig(
 			`[permissions.${DEV3_CODEX_PROFILE}.filesystem]`,
 			'":minimal" = "read"',
 			...dev3FilesystemLines(userHome, dev3Home),
+			...[...new Set(options.codexInstallRoots)].map(codexInstallLine),
 			"",
 			filesystemRootsHeader(DEV3_CODEX_PROFILE, syntax.filesystemRootKey),
 			'"." = "write"',
@@ -887,6 +988,9 @@ export function ensureCodexConfig(
 			if (!config.includes(fsLine)) {
 				config = insertAfterSectionHeader(config, fsHeader, fsLine);
 			}
+		}
+		if (options.codexInstallRoots) {
+			config = reconcileCodexInstallRoots(config, [...new Set(options.codexInstallRoots)]);
 		}
 		config = ensureFilesystemRootAccess(config, DEV3_CODEX_PROFILE, syntax.filesystemRootKey);
 	}
@@ -1618,6 +1722,7 @@ export async function ensureCodexConfigFile(homePath: string): Promise<void> {
 
 		const updated = ensureCodexConfig(content, worktreesPath, socketsPath, [], {
 			codexVersion,
+			codexInstallRoots: await resolveCodexInstallRoots(),
 		});
 
 		if (updated !== content) {
