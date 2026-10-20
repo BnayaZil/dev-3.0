@@ -1937,6 +1937,20 @@ describe("handlers.cloneAndAddProject", () => {
 			error: "Directory already exists: /base/my-repo",
 		});
 	});
+
+	// A URL pasted into "Repository name" once cloned to `<base>/https://host/group/repo`.
+	it("refuses a URL or a path as the repository folder name, touching nothing", async () => {
+		for (const repoName of ["https://gitlab.example.com/group/notes-app", "group/notes-app", ".."]) {
+			const result = await handlers.cloneAndAddProject({
+				url: "https://gitlab.example.com/group/notes-app.git",
+				baseDir: "/base",
+				repoName,
+			});
+			expect(result.ok).toBe(false);
+		}
+		expect(git.cloneRepo).not.toHaveBeenCalled();
+		expect(data.addProject).not.toHaveBeenCalled();
+	});
 });
 
 // ================================================================

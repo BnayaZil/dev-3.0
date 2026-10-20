@@ -1789,6 +1789,8 @@ export type AppRPCSchema = {
 		messages: {
 			taskUpdated: { projectId: string; task: Task };
 			projectUpdated: { project: Project };
+			/** A project registered outside the renderer (`dev3 projects add|clone`). */
+			projectAdded: { project: Project };
 			spacesUpdated: { file: SpacesFile };
 			taskSound: { status: TaskSoundStatus; taskId: string };
 			ptyDied: { taskId: string };

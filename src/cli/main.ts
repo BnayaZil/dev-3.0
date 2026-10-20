@@ -2,6 +2,7 @@ import { extractInstanceFlag, parseArgs, resolveFileArgs } from "./args";
 import { detectContext, resolveInstanceSocket, resolveSocketPath, resolveSocketPathWithRetry, socketDiagnostics } from "./context";
 import { exitAppNotRunning, exitInternalError, exitUsage } from "./output";
 import { handleProjects } from "./commands/projects";
+import { handleSpaces } from "./commands/spaces";
 import { handleTasks } from "./commands/tasks";
 import { handleTask } from "./commands/task";
 import { handleCurrent } from "./commands/current";
@@ -134,7 +135,14 @@ Commands:
   dev3 doctor --processes [--json]       Which task owns each native terminal host/shell (seq, pane, role, pid, liveness)
   dev3 install-hooks                     Install Claude worktree hooks, stable Codex user hooks and the omp status extension
   dev3 install-skills                    Install agent skills globally
-  dev3 projects list                    List all projects
+  dev3 projects list [--json]           List all projects with the spaces they belong to
+  dev3 projects add <path> [--name "..."] [--space <id|name>]... [--new-space "..."]... [--no-space] [--init] [--json]
+                                         Register a local git repo as a project, optionally in spaces (exit 33 if already registered)
+  dev3 projects clone <git-url> [--dir <parent>] [--name "..."] [--space ...] [--new-space ...] [--no-space] [--json]
+                                         Clone a repo into the app's clone folder (or --dir) and register it
+  dev3 spaces list [--json]             List spaces with their projects and ids
+  dev3 spaces create "name" [--project <id>]...  Create a space (never empty: defaults to the current project)
+  dev3 spaces set|add|remove <space>... [--project <id>]  Change a project's spaces (set REPLACES; set --no-space = none)
   dev3 remote [start|status|url|stop]    Run headless — serve the UI to a browser
                                          (backgrounds by default; manage it with
                                           status / url / restart / logs / stop.
@@ -422,6 +430,9 @@ async function main(): Promise<void> {
 			// the same forwarding `task list` already does for `tasks list`.
 			case "project":
 				return await handleProjects(subcommand, args, socketPath);
+			case "spaces":
+			case "space":
+				return await handleSpaces(subcommand, args, socketPath, context);
 			case "tasks":
 				return await handleTasks(subcommand, args, socketPath, context);
 			case "task":

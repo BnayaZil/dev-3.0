@@ -31,6 +31,8 @@ export const CLI_EXIT_CODE_PEEK_FOLLOW_UNSUPPORTED = 29;
 export const CLI_EXIT_CODE_PANE_NO_ROOM = 30;
 export const CLI_EXIT_CODE_RESUME_ALREADY_RUNNING = 31;
 export const CLI_EXIT_CODE_RESUME_UNAVAILABLE = 32;
+export const CLI_EXIT_CODE_PROJECT_ALREADY_REGISTERED = 33;
+export const CLI_EXIT_CODE_SPACE_REF_INVALID = 34;
 
 export const CLI_EXIT_CODE_DEFINITIONS = [
 	{
@@ -225,5 +227,17 @@ export const CLI_EXIT_CODE_DEFINITIONS = [
 		code: CLI_EXIT_CODE_RESUME_UNAVAILABLE,
 		description:
 			"`dev3 agent resume` found nothing it can safely resume, and NOTHING was launched: the task is a draft or not active, it has no worktree, it has no saved agent session, a saved pane runs an agent CLI dev3 cannot resume (it would start over from the task description; `--allow-agent-latest` does not change that), or (without `--allow-agent-latest`) a saved pane has no conversation id, so its harness would pick its own latest conversation and might start a new one. With `--json` the result carries a `reason` (`draft`, `not-active`, `no-worktree`, `no-saved-session`, `harness-cannot-resume`, `session-id-unknown`). It never re-runs the task description; Start Fresh stays an explicit choice in the app. The one pane that does open a new, empty conversation is reported as `fresh-session`: nothing of its own survives and every transcript belongs to another pane, so reopening any of them would duplicate it. Distinct from exit 1, which means a resume was attempted and failed.",
+	},
+	{
+		constant: "CLI_EXIT_CODE_PROJECT_ALREADY_REGISTERED",
+		code: CLI_EXIT_CODE_PROJECT_ALREADY_REGISTERED,
+		description:
+			"`dev3 projects add` or `dev3 projects clone` found the folder already registered as a project (compared with symlinks resolved), so NOTHING changed: no project was added, nothing was cloned, and its spaces were left as they are even when `--space` / `--new-space` / `--no-space` was passed. The existing project is printed — with `--json` as the usual result object, `outcome` = `exists` — so a script can take its id and carry on; change its spaces with `dev3 spaces set|add|remove --project <id>`. Distinct from exit 1 so registering a repo can be treated as idempotent.",
+	},
+	{
+		constant: "CLI_EXIT_CODE_SPACE_REF_INVALID",
+		code: CLI_EXIT_CODE_SPACE_REF_INVALID,
+		description:
+			"A `dev3 projects add|clone` or `dev3 spaces …` command named a space it cannot use, so NOTHING was added, cloned, created or changed: a `--space` / positional space matched no space or more than one (a name two spaces share — pass the id), or `--new-space` / `spaces create` named a space that already exists (names compare case-insensitively). The message lists the existing spaces with their ids. Distinct from exit 1 so a caller can fall back to creating the space (`--new-space`, `dev3 spaces create`) or to joining the existing one, instead of treating it as a failed registration.",
 	},
 ] as const;

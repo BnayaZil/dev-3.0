@@ -1779,6 +1779,16 @@ function App() {
 		return () => window.removeEventListener("rpc:projectUpdated", onProjectUpdated);
 	}, [dispatch]);
 
+	// `addProject` upserts, so a push for a project this window already shows is harmless.
+	useEffect(() => {
+		function onProjectAdded(e: Event) {
+			const { project } = (e as CustomEvent).detail;
+			dispatch({ type: "addProject", project });
+		}
+		window.addEventListener("rpc:projectAdded", onProjectAdded);
+		return () => window.removeEventListener("rpc:projectAdded", onProjectAdded);
+	}, [dispatch]);
+
 	useEffect(() => {
 		function onTaskSound(e: Event) {
 			const { status } = (e as CustomEvent).detail;

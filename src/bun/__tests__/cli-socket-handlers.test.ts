@@ -149,6 +149,14 @@ vi.mock("../notification-log", () => ({
 	appendNotificationLog: vi.fn(),
 }));
 
+vi.mock("../project-registration", () => ({
+	registerProject: vi.fn(async () => ({ outcome: "added" })),
+	cloneProject: vi.fn(async () => ({ outcome: "added" })),
+	listSpaces: vi.fn(async () => ({ version: 1, spaces: [], order: [] })),
+	createSpaceWith: vi.fn(async () => ({ id: "sp_1" })),
+	changeProjectSpaces: vi.fn(async () => ({ deletedSpaces: [] })),
+}));
+
 vi.mock("../task-start-ref", () => ({
 	resolveTaskStartRef: vi.fn(async () => undefined),
 }));
@@ -1190,6 +1198,51 @@ describe("projects.list", () => {
 		const resp = await handleRequest(makeRequest("projects.list"));
 		expect(resp.ok).toBe(true);
 		expect(resp.data).toEqual([git, ops]);
+	});
+});
+
+describe("projects.add / projects.clone / spaces.*", () => {
+	it("hands projects.add its flags, dropping anything that is not a string list", async () => {
+		const { registerProject } = await import("../project-registration");
+
+		const resp = await handleRequest(makeRequest("projects.add", {
+			path: "/repos/app", init: true, spaces: ["Work / Side", 7], newSpaces: "not-a-list", noSpace: "yes",
+		}));
+
+		expect(resp.ok).toBe(true);
+		expect(registerProject).toHaveBeenCalledWith({
+			path: "/repos/app", name: undefined, init: true, spaces: ["Work / Side"], newSpaces: [], noSpace: false,
+		});
+	});
+
+	it("hands projects.clone its URL, folder and name", async () => {
+		const { cloneProject } = await import("../project-registration");
+
+		await handleRequest(makeRequest("projects.clone", { url: "https://example.com/g/r.git", dir: "/clones", name: "r" }));
+
+		expect(cloneProject).toHaveBeenCalledWith({
+			url: "https://example.com/g/r.git", dir: "/clones", name: "r", spaces: [], newSpaces: [], noSpace: false,
+		});
+	});
+
+	it("rejects an unknown spaces.change mode and a missing project", async () => {
+		const bad = await handleRequest(makeRequest("spaces.change", { projectId: "p1", mode: "move", spaces: [] }));
+		expect(bad.ok).toBe(false);
+		expect(bad.error).toContain("Invalid mode");
+
+		const noProject = await handleRequest(makeRequest("spaces.change", { mode: "add", spaces: ["A"] }));
+		expect(noProject.ok).toBe(false);
+		expect(noProject.error).toContain("projectId is required");
+	});
+
+	it("routes spaces.change and spaces.create", async () => {
+		const { changeProjectSpaces, createSpaceWith } = await import("../project-registration");
+
+		await handleRequest(makeRequest("spaces.change", { projectId: "p1", mode: "remove", spaces: ["A"] }));
+		await handleRequest(makeRequest("spaces.create", { name: "Side", projectIds: ["p1"] }));
+
+		expect(changeProjectSpaces).toHaveBeenCalledWith({ projectId: "p1", mode: "remove", spaces: ["A"] });
+		expect(createSpaceWith).toHaveBeenCalledWith({ name: "Side", projectIds: ["p1"] });
 	});
 });
 

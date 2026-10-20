@@ -3057,7 +3057,8 @@ export async function cloneRepo(
 	// `run()` buffers output until exit, so it can't surface live progress.
 	// `--progress` forces git to emit progress even though stderr is a pipe
 	// (it normally requires a TTY).
-	const proc = spawn(["git", "clone", "--progress", url, targetDir], {
+	// `--`: the URL can come from an agent, and one starting with "-" must not be read as an option.
+	const proc = spawn(["git", "clone", "--progress", "--", url, targetDir], {
 		cwd: process.cwd(),
 		stdout: "pipe",
 		stderr: "pipe",

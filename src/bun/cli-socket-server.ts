@@ -827,6 +827,15 @@ async function conversationImport() {
 	return (await import("./rpc-handlers/conversation-import-handlers")).conversationImportHandlers;
 }
 
+// Lazy for the same reason: it reaches the app and spaces handler domains.
+async function projectRegistration() {
+	return import("./project-registration");
+}
+
+function stringList(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
 type Handler = (params: Record<string, unknown>) => Promise<unknown>;
 
 // An approval temporarily moves a task to user-questions. Remember which
@@ -1121,6 +1130,9 @@ const handlers: Record<string, Handler> = {
 			} else if (event === "projectUpdated" && projectId) {
 				const project = await data.getProject(projectId);
 				localPush("projectUpdated", { project });
+			} else if (event === "projectAdded" && projectId) {
+				const project = await data.getProject(projectId);
+				localPush("projectAdded", { project });
 			} else if (event === "agentMessageLogChanged" && projectId) {
 				localPush("agentMessageLogChanged", { projectId });
 			} else if (event === "spacesUpdated") {
@@ -1138,6 +1150,39 @@ const handlers: Record<string, Handler> = {
 		// Merge virtual ("Operations") boards so the CLI sees the same project set
 		// as the app (matches getProjects in app-handlers).
 		return [...await data.loadProjects(), ...await data.loadVirtualProjects()];
+	},
+
+	"projects.add": async (params) => (await projectRegistration()).registerProject({
+		path: String(params.path ?? ""),
+		name: typeof params.name === "string" ? params.name : undefined,
+		init: params.init === true,
+		spaces: stringList(params.spaces),
+		newSpaces: stringList(params.newSpaces),
+		noSpace: params.noSpace === true,
+	}),
+
+	"projects.clone": async (params) => (await projectRegistration()).cloneProject({
+		url: String(params.url ?? ""),
+		dir: typeof params.dir === "string" ? params.dir : undefined,
+		name: typeof params.name === "string" ? params.name : undefined,
+		spaces: stringList(params.spaces),
+		newSpaces: stringList(params.newSpaces),
+		noSpace: params.noSpace === true,
+	}),
+
+	"spaces.list": async () => (await projectRegistration()).listSpaces(),
+
+	"spaces.create": async (params) => (await projectRegistration()).createSpaceWith({
+		name: String(params.name ?? ""),
+		projectIds: stringList(params.projectIds),
+	}),
+
+	"spaces.change": async (params) => {
+		const mode = params.mode;
+		if (mode !== "set" && mode !== "add" && mode !== "remove") throw new Error(`Invalid mode: ${String(mode)}. Use set, add or remove.`);
+		const projectId = params.projectId as string;
+		if (!projectId) throw new Error("projectId is required");
+		return (await projectRegistration()).changeProjectSpaces({ projectId, mode, spaces: stringList(params.spaces) });
 	},
 
 	"tasks.list": async (params) => {

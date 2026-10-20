@@ -139,6 +139,7 @@ describe("registry coverage", () => {
 		"install-skills",
 		"conversations",
 		"projects",
+		"spaces",
 		"tasks",
 		"task",
 		"note",
@@ -177,6 +178,23 @@ describe("the singular `project` alias", () => {
 		expect(hasCommandHelp("project")).toBe(true);
 		expect(getCommandHelp("project")).toBe(getCommandHelp("projects"));
 		expect(renderHelp("project", "list")).toContain("dev3 projects list");
+	});
+
+	it("resolves the singular `space` to the plural spaces command", () => {
+		expect(getCommandHelp("space")).toBe(getCommandHelp("spaces"));
+	});
+});
+
+describe("projects / spaces help", () => {
+	it("names the duplicate and space-ref exit codes on projects add", () => {
+		const out = renderHelp("projects", "add")!;
+		expect(out).toContain("exits 33");
+		expect(out).toContain("exit 34");
+		expect(out).toContain("dev3 projects clone <url>");
+	});
+
+	it("tells the reader that spaces set replaces the whole membership", () => {
+		expect(renderHelp("spaces", "set")).toContain("REPLACE");
 	});
 });
 

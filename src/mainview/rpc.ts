@@ -90,6 +90,7 @@ const pushMessageHandlers: Record<string, (payload: any) => void> = {
 	taskUpdated: (payload) => window.dispatchEvent(new CustomEvent("rpc:taskUpdated", { detail: payload })),
 	taskRemoved: (payload) => window.dispatchEvent(new CustomEvent("rpc:taskRemoved", { detail: payload })),
 	projectUpdated: (payload) => window.dispatchEvent(new CustomEvent("rpc:projectUpdated", { detail: payload })),
+	projectAdded: (payload) => window.dispatchEvent(new CustomEvent("rpc:projectAdded", { detail: payload })),
 	spacesUpdated: (payload) => window.dispatchEvent(new CustomEvent("rpc:spacesUpdated", { detail: payload })),
 	taskSound: (payload) => window.dispatchEvent(new CustomEvent("rpc:taskSound", { detail: payload })),
 	ptyDied: (payload) => window.dispatchEvent(new CustomEvent("rpc:ptyDied", { detail: payload })),

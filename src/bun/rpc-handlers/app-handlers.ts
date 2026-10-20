@@ -31,6 +31,7 @@ import { applyMenuContext, type MenuContext } from "../../shared/application-men
 import { loadSharedArtifactContent, loadSharedArtifactDownload, sharedArtifactDownloadKind, sharedArtifactHtmlPath, sharedArtifactLinkScope } from "../shared-artifacts";
 import { mintFileLink } from "../file-links";
 import { isFullyQualifiedPath } from "../../shared/absolute-path";
+import { cloneDirNameProblem } from "../../shared/project-registration";
 import { clipboardImageToPng } from "../clipboard-image";
 import { sharedVideoUrlPath } from "../shared-video-stream";
 
@@ -385,6 +386,8 @@ async function cloneAndAddProject(params: { url: string; baseDir: string; repoNa
 	log.info("→ cloneAndAddProject", params);
 	try {
 		const name = params.repoName || extractRepoName(params.url);
+		const nameProblem = cloneDirNameProblem(name);
+		if (nameProblem) return { ok: false, error: nameProblem };
 		const targetDir = `${params.baseDir}/${name}`;
 
 		if (existsSync(targetDir)) {

@@ -46,6 +46,13 @@ describe("cloneRepo", () => {
 		expect(updates.flat().join("\n")).toContain("Cloning into");
 	});
 
+	it("treats a URL starting with a dash as a repository, never as a git option", async () => {
+		const result = await cloneRepo("--upload-pack=echo", join(repo.dir, "cloned-dash"));
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("repository '--upload-pack=echo' does not exist");
+	});
+
 	it("returns a terminal-style error tail when the clone fails", async () => {
 		const target = join(repo.dir, "cloned-fail");
 
