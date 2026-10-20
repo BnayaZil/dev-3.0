@@ -121,7 +121,7 @@ describe("evaluateTask", () => {
 	});
 
 	it("gives up when the conversation cannot be resumed", async () => {
-		vi.mocked(resumeTaskSession).mockRejectedValue(new ResumeUnavailableError("no-saved-session"));
+		vi.mocked(resumeTaskSession).mockRejectedValue(new ResumeUnavailableError("no-saved-session", "no saved session"));
 		const task = makeTask({ enabled: true, status: "watching", attempts: 0 });
 		H.task = task;
 		await evaluateTask(project, task, NOW);
