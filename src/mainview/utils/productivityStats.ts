@@ -5,9 +5,10 @@ import {
 } from "../../shared/types";
 import { computePeriodTime } from "./periodTime";
 
-export type StatsRange = "day" | "week" | "month" | "all";
+/** "month" is a rolling 30 days; "mtd" is the calendar month to date. */
+export type StatsRange = "day" | "week" | "month" | "mtd" | "all";
 
-export const STATS_RANGES: readonly StatsRange[] = ["day", "week", "month", "all"] as const;
+export const STATS_RANGES: readonly StatsRange[] = ["day", "week", "month", "mtd", "all"] as const;
 
 export interface HeroMetric {
 	/** Current-period value. */
@@ -344,12 +345,33 @@ function periodSpanMs(range: StatsRange): number {
 			return 7 * DAY_MS;
 		case "month":
 			return 30 * DAY_MS;
+		case "mtd":
+			throw new Error("mtd steps by calendar month, see monthToDateWindow");
 		default:
 			return DAY_MS;
 	}
 }
 
-function rangeWindow(range: StatsRange, nowMs: number, earliestMs: number): Window {
+/**
+ * Calendar month `steps` back. A past month is whole and compared with the whole month before;
+ * the current month runs to now and is compared with the same date and clock time last month
+ * (by calendar fields, so DST cannot shift it; a date past the month's end clamps to its end).
+ */
+function monthToDateWindow(nowMs: number, steps: number): Window {
+	const now = new Date(nowMs);
+	const y = now.getFullYear();
+	const m = now.getMonth();
+	const monthStart = (back: number) => new Date(y, m - back, 1).getTime();
+	const from = monthStart(steps);
+	const prevFrom = monthStart(steps + 1);
+	if (steps > 0) return { from, to: monthStart(steps - 1), prevFrom, prevTo: from };
+	const sameTimeLastMonth = new Date(y, m - 1, now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+	return { from, to: nowMs, prevFrom, prevTo: Math.min(from, sameTimeLastMonth.getTime()) };
+}
+
+function rangeWindow(range: StatsRange, nowMs: number, steps: number, earliestMs: number): Window {
+	if (range === "mtd") return monthToDateWindow(nowMs, steps);
+	nowMs -= steps * periodSpanMs(range);
 	switch (range) {
 		case "day":
 			return { from: nowMs - DAY_MS, to: nowMs, prevFrom: nowMs - 2 * DAY_MS, prevTo: nowMs - DAY_MS };
@@ -394,6 +416,11 @@ function buildSeries(
 			const start = startToday - i * DAY_MS;
 			const d = new Date(start);
 			push(start, range === "week" ? WEEKDAYS[d.getDay()] : `${d.getDate()}`);
+		}
+		assignByDay(buckets, completedEvents);
+	} else if (range === "mtd") {
+		for (let d = new Date(win.from); d.getTime() < win.to || buckets.length === 0; d.setDate(d.getDate() + 1)) {
+			push(d.getTime(), `${d.getDate()}`);
 		}
 		assignByDay(buckets, completedEvents);
 	} else {
@@ -528,8 +555,7 @@ export function computeProductivityStats(
 
 	// Shift the window anchor back by `offset` whole periods. "all" never steps.
 	const steps = range === "all" ? 0 : Math.max(0, Math.floor(offset));
-	const anchorMs = nowMs - steps * periodSpanMs(range);
-	const win = rangeWindow(range, anchorMs, earliest);
+	const win = rangeWindow(range, nowMs, steps, earliest);
 
 	const inPeriod = (at: number | null, from: number, to: number) => at != null && at >= from && at < to;
 
