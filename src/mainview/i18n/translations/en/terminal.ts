@@ -106,6 +106,9 @@ const terminal = {
 	"nativeViewer.transferFailedHint": "The terminal host did not confirm the transfer. Check the terminal is still alive, then try again.",
 	"nativeViewer.takeControl": "Take control",
 	"nativeViewer.takeControlHint": "Type in this terminal; the other viewer becomes read-only",
+	"sharedSize.sizedElsewhere": "Sized for another viewer",
+	"sharedSize.fitHere": "Fit here",
+	"sharedSize.fitHereHint": "Resize the terminal to this window. Clicking or typing in it does the same.",
 
 	// Tmux hotkey hints
 	"tmux.hSplit": "h-split",

@@ -2726,3 +2726,186 @@ describe("TerminalView – Ctrl+Backspace word delete", () => {
 		expect(mockInput).not.toHaveBeenCalled();
 	});
 });
+
+// One tmux PTY, several viewers: it follows the viewer used last
+// (h0x91b/dev-3.0#2000). Every other viewer renders at that grid and takes it
+// back with a click, a keystroke, focus or becoming visible.
+describe("TerminalView – shared tmux size", () => {
+	const ACTIVE = "\x1b]dev3viewer;active\x07";
+	const HIDDEN = "\x1b]dev3viewer;hidden\x07";
+
+	async function renderShared() {
+		let result!: ReturnType<typeof render>;
+		await act(async () => {
+			result = render(
+				<I18nProvider>
+					<TerminalView ptyUrl="ws://localhost:1234" taskId="t1" projectId="p1" />
+				</I18nProvider>,
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+		await act(async () => {
+			fireResize?.();
+		});
+		return { container: result.container.querySelector("[data-terminal]") as HTMLElement, pill: () => result.queryByText("Sized for another viewer") };
+	}
+
+	function notice(cols: number, rows: number, sizing: boolean) {
+		act(() => {
+			lastWebSocket?.onmessage?.({ data: `\x1b]dev3sizing;${cols};${rows};${sizing ? 1 : 0}\x07` } as MessageEvent);
+		});
+	}
+
+	function sent(): string[] {
+		return lastWebSocket!.send.mock.calls.map((call) => call[0] as string);
+	}
+
+	it("renders at the shared grid while sized elsewhere, and keeps reporting its own viewport", async () => {
+		const { pill } = await renderShared();
+		fitAddonHolder.current!.proposeDimensions = vi.fn(() => ({ cols: 100, rows: 30 }));
+		mockTermInstance.resize.mockClear();
+		lastWebSocket!.send.mockClear();
+
+		notice(22, 40, false);
+
+		expect(pill()).toBeInTheDocument();
+		expect(mockTermInstance.resize).toHaveBeenCalledWith(22, 40);
+		expect(sent()).toContain("\x1b]resize;100;30\x07");
+		expect(sent()).not.toContain("\x1b]resize;22;40\x07");
+	});
+
+	// tmux's redraw at the new size follows the notice on the same socket; a fit
+	// deferred to a later frame let that redraw land on the old grid (browser QA).
+	it("re-fits at once on a notice, before any later frame", async () => {
+		const { pill } = await renderShared();
+		vi.stubGlobal("requestAnimationFrame", () => 1);
+		try {
+			mockTermInstance.resize.mockClear();
+			notice(22, 40, false);
+			expect(mockTermInstance.resize).toHaveBeenLastCalledWith(22, 40);
+
+			fitAddonHolder.current!.proposeDimensions = vi.fn(() => ({ cols: 100, rows: 30 }));
+			notice(100, 30, true);
+			expect(mockTermInstance.resize).toHaveBeenLastCalledWith(100, 30);
+			expect(pill()).not.toBeInTheDocument();
+		} finally {
+			vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+				cb(0);
+				return 1;
+			});
+		}
+	});
+
+	it("never reports the shared grid it follows as its own size", async () => {
+		await renderShared();
+		notice(22, 40, false);
+		lastWebSocket!.send.mockClear();
+
+		const onResize = (mockTermInstance.onResize.mock.calls[0] as unknown[])[0] as (size: { cols: number; rows: number }) => void;
+		onResize({ cols: 22, rows: 40 });
+
+		expect(sent()).toEqual([]);
+	});
+
+	it("goes back to fitting its own container once it is the one sized for", async () => {
+		const { pill } = await renderShared();
+		notice(22, 40, false);
+		fitAddonHolder.current!.proposeDimensions = vi.fn(() => ({ cols: 100, rows: 30 }));
+		mockTermInstance.resize.mockClear();
+
+		notice(100, 30, true);
+
+		expect(pill()).not.toBeInTheDocument();
+		expect(mockTermInstance.resize).toHaveBeenCalledWith(100, 30);
+	});
+
+	it("takes the size back on a click or keystroke only while another viewer has it", async () => {
+		const { container } = await renderShared();
+		notice(100, 30, true);
+		lastWebSocket!.send.mockClear();
+		fireEvent.pointerDown(container);
+		fireEvent.keyDown(container, { key: "a" });
+		expect(sent()).not.toContain(ACTIVE);
+
+		notice(22, 40, false);
+		fireEvent.pointerDown(container);
+		expect(sent()).toContain(ACTIVE);
+	});
+
+	// The whole pill is the button: a phone tap on its label must take the size too.
+	it("takes the size from anywhere on the pill, and from composer input", async () => {
+		let handle: TerminalHandle | null = null;
+		let result!: ReturnType<typeof render>;
+		await act(async () => {
+			result = render(
+				<I18nProvider>
+					<TerminalView ptyUrl="ws://localhost:1234" taskId="t1" projectId="p1" onReady={(h) => { handle = h; }} />
+				</I18nProvider>,
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+		await act(async () => {
+			fireResize?.();
+		});
+		notice(22, 40, false);
+		lastWebSocket!.send.mockClear();
+		fireEvent.click(result.getByText("Sized for another viewer"));
+		expect(sent()).toEqual([ACTIVE]);
+
+		lastWebSocket!.send.mockClear();
+		fireEvent.click(result.getByRole("button", { name: /Fit here/ }));
+		expect(sent()).toEqual([ACTIVE]);
+
+		lastWebSocket!.send.mockClear();
+		handle!.sendInput("x");
+		expect(sent()).toEqual([ACTIVE, "x"]);
+	});
+
+	it("reports going hidden and coming back", async () => {
+		await renderShared();
+		lastWebSocket!.send.mockClear();
+
+		Object.defineProperty(document, "hidden", { configurable: true, value: true });
+		act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+		expect(sent()).toContain(HIDDEN);
+
+		Object.defineProperty(document, "hidden", { configurable: true, value: false });
+		act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+		expect(sent()).toContain(ACTIVE);
+	});
+
+	// A zoom (or terminal-font) change resizes the canvas without touching the
+	// container, so nothing else reports the new viewport: a follower must still
+	// render at the shared grid AND tell the server its own size, or taking over
+	// afterwards applies the pre-zoom geometry.
+	it("still reports its own viewport when zoom changes while sized elsewhere", async () => {
+		await renderShared();
+		notice(22, 40, false);
+		fitAddonHolder.current!.proposeDimensions = vi.fn(() => ({ cols: 90, rows: 28 }));
+		mockTermInstance.resize.mockClear();
+		lastWebSocket!.send.mockClear();
+
+		act(() => { window.dispatchEvent(new CustomEvent("dev3-zoom-changed", { detail: 1.25 })); });
+
+		expect(sent()).toContain("\x1b]resize;90;28\x07");
+		expect(mockTermInstance.resize).toHaveBeenCalledWith(22, 40);
+	});
+
+	it("claims the size on connect only when the user is looking at it", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus");
+		try {
+			hasFocus.mockReturnValue(false);
+			await renderShared();
+			act(() => { lastWebSocket!.onopen?.(new Event("open")); });
+			expect(sent()).not.toContain(ACTIVE);
+
+			hasFocus.mockReturnValue(true);
+			act(() => { lastWebSocket!.onopen?.(new Event("open")); });
+			expect(sent()).toContain(ACTIVE);
+		} finally {
+			hasFocus.mockRestore();
+		}
+	});
+});

@@ -1173,6 +1173,7 @@ function TaskTerminal({ projectId, taskId, tasks, projects, navigate, dispatch, 
 
 	// ── Tmux path (unchanged) ──────────────────────────────────────────────────
 
+
 	const terminalArea = ptyUrl ? (
 		<TerminalView
 			ptyUrl={ptyUrl}
