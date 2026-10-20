@@ -1,13 +1,11 @@
 {
 	"name": "electrobun-react-tailwind-vite",
 	"version": "1.59.0",
-	"description": "Electrobun app with React, Tailwind CSS, and Vite HMR",
+	"description": "Terminal-centric project manager built with Electrobun, React, Tailwind CSS, and Vite",
 	"license": "Apache-2.0",
 	"author": "Arseny Pavlenko",
 	"scripts": {
 		"dev": "bun scripts/dev.ts",
-		"watch": "concurrently --kill-others \"bun run hmr\" \"bun run scripts/watch-main.ts\"",
-		"hmr": "vite --port 5173",
 		"build": "bun scripts/generate-build-info.ts && bun scripts/generate-changelog.ts && vite build && bun run build:cli && electrobun build",
 		"build:prod": "bun scripts/generate-build-info.ts && bun scripts/generate-changelog.ts && vite build && bun run build:cli && electrobun build --channel prod",
 		"build:cli": "bun scripts/build-cli.ts",
@@ -20,7 +18,6 @@
 		"test:cli": "VT=$(command -v rtk >/dev/null 2>&1 && echo rtk || echo bunx) && $VT vitest run --config vitest.config.cli.ts",
 		"perf:task-store": "bun src/bun/__tests__/task-store-burst.bun-perf.ts",
 		"test:pane-e2e": "bun --preload ./src/bun/__tests__/pane-exit-e2e-preload.ts src/bun/__tests__/pane-exit-e2e.ts",
-		"test:proto-e2e": "bun src/bun/prototypes/detached-pty/__tests__/lifecycle.bun-e2e.ts",
 		"test:native-cross-session-echo": "bun src/bun/native-terminal-registry/__tests__/cross-session-echo-probe.ts",
 		"test:native-registry-e2e": "bun src/bun/native-terminal-registry/__tests__/lifecycle.bun-e2e.ts",
 		"test:native-output-log-e2e": "bun src/bun/native-terminal-registry/__tests__/output-log.bun-e2e.ts",
