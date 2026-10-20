@@ -14,6 +14,14 @@ export const KEEP_ALIVE_BACKOFF_BASE_MS = 30_000;
 export const KEEP_ALIVE_BACKOFF_MAX_MS = 5 * 60_000;
 /** Wait this long past a known rate-limit reset before trying again. */
 export const KEEP_ALIVE_RATE_LIMIT_BUFFER_MS = 60_000;
+/**
+ * Never silently defer a revive beyond this. A reset further out than this (a
+ * weekly limit resetting days away, a stale/garbage timestamp) is not something
+ * to wait out in silence — fall through to the ordinary attempt→backoff→give-up
+ * path so the user gets a "gave up" badge instead of a multi-day quiet hold.
+ * Mirrors Claude Code's own ">24h out → don't wait" rule.
+ */
+export const KEEP_ALIVE_MAX_RATE_LIMIT_WAIT_MS = 24 * 60 * 60_000;
 /** A usage window at/above this percent is treated as blocking (the limit is hit). */
 export const KEEP_ALIVE_BLOCKED_PERCENT = 100;
 
@@ -68,5 +76,9 @@ export function keepAliveRateLimitWaitUntil(
 		const reset = keepAliveSnapshotResetMs(s, nowMs);
 		if (reset !== null) latest = latest === null ? reset : Math.max(latest, reset);
 	}
-	return latest === null ? null : latest + KEEP_ALIVE_RATE_LIMIT_BUFFER_MS;
+	if (latest === null) return null;
+	const waitUntil = latest + KEEP_ALIVE_RATE_LIMIT_BUFFER_MS;
+	// A reset too far out (a weekly limit, a bad timestamp) is not worth a silent
+	// multi-day hold — let the caller fall through to attempt → backoff → give up.
+	return waitUntil - nowMs > KEEP_ALIVE_MAX_RATE_LIMIT_WAIT_MS ? null : waitUntil;
 }

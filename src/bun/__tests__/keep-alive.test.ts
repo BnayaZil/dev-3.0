@@ -100,4 +100,9 @@ describe("keepAliveRateLimitWaitUntil", () => {
 		expect(keepAliveRateLimitWaitUntil(report([snap("claude", null, [win(10, NOW + 5_000)])]), "claude", null, NOW)).toBeNull();
 		expect(keepAliveRateLimitWaitUntil(null, "claude", null, NOW)).toBeNull();
 	});
+	it("does not defer a reset further out than the cap (a weekly limit)", () => {
+		const farOut = NOW + 3 * 24 * 60 * 60_000; // 3 days — a weekly-class reset
+		const r = report([snap("claude", null, [win(100, farOut)])]);
+		expect(keepAliveRateLimitWaitUntil(r, "claude", null, NOW)).toBeNull();
+	});
 });
