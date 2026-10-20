@@ -44,7 +44,13 @@ const UX_DIR = fileURLToPath(new URL("../../../docs/ux", import.meta.url));
  * file is §10 rows whose why exists nowhere else.
  */
 const BUDGET_KB: Record<string, number> = {
-	"PRODUCT_UX_BIBLE.md": 132,
+	"PRODUCT_UX_BIBLE.md": 133,
+	// 132 → 133 for the keep-alive / auto-revive rule: a new durable task property
+	// (`Task.keepAlive`, same class as draft/hibernated/sensitive) with a §3 object
+	// note and a §10 placement row whose why — a cross-cutting property is never a
+	// column — exists nowhere else in the file. Both additions were trimmed to the
+	// bone first (the full reasoning lives in the decision record), leaving the file
+	// a hair under the +1KB step. Matches the 122→123 single-new-rule precedent below.
 	// 130 → 132 for §5.10's rewrite from a single boolean to per-control hiding
 	// with Simplify View as a preset (real review feedback: the design moved
 	// substantially between when the section shipped `Proposed` and the code
@@ -143,10 +149,12 @@ const BUDGET_KB: Record<string, number> = {
 	// hide-list + never-hides list for the new Simplify preference. Compacted first
 	// (dropped one duplicated evidence line, shortened every string value) but `main`
 	// had ~50 bytes of headroom on each file before this landed. Status: Proposed.
-	"UX_DECISIONS.md": 83,
+	"UX_DECISIONS.md": 84,
 	// 82 → 83: two follow-up log entries the same day widened `simplify_mode`'s hide-list
 	// and swapped spawn-extra-agent back for the Setup Dev Server prompt. Each entry is
 	// already the compact one-line-rule form; `main` had ~90 bytes of headroom for both.
+	// 83 → 84: the keep-alive / auto-revive decision pointer (bible §3/§10, its why in
+	// decisions/2026/10/20/). Already the compact one-line form; the index had no headroom.
 };
 
 /**

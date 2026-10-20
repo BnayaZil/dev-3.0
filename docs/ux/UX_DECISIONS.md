@@ -10,6 +10,8 @@ reasoning (48 of 50 dates), so the record wins and this file stays an index. Wri
 in full only while no record exists — the case for 84 below, whose reasoning lives nowhere
 else, so never compact them by deleting it.
 
+2026-10-20 — Keep-alive (auto-revive) is a task property, not a column (bible §3/§10): a monitored task keeps its real status; surfaced by a passive card marker + an `is:keepalive` filter and toggled from the context menu / `dev3 keep-alive`, never a column or lane. Why: decisions/2026/10/20/keep-alive-is-a-task-property-not-a-column.md.
+
 2026-10-16 — Account sign-in runs in a modal terminal, not a copied command (yaml `modal.observed`): Escape stays with the CLI, X hides, Cancel ends. Why: decisions/2026/10/16/embedded-account-login-terminal.md.
 
 ## 2026-10-14 — Agent toast bursts stack as a deck
