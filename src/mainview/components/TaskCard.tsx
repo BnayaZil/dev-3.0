@@ -888,6 +888,25 @@ function TaskCard({ task, project, dispatch, navigate, agents, onLaunchVariants,
 						</span>
 					</Tooltip>
 				)}
+				{task.keepAlive?.enabled && (
+					<Tooltip
+						content={
+							task.keepAlive.status === "gave-up"
+								? t("task.keepAliveGaveUp")
+								: task.keepAlive.status === "reviving"
+									? t("task.keepAliveReviving")
+									: t("task.keepAliveWatching")
+						}
+					>
+						<span
+							data-testid="task-card-keep-alive"
+							className={`flex-shrink-0 ${task.keepAlive.status === "gave-up" ? "text-danger" : "text-accent"}${task.keepAlive.status === "reviving" ? " motion-safe:animate-pulse" : ""}`}
+							style={{ fontFamily: "'JetBrainsMono Nerd Font Mono'" }}
+						>
+							{"\u{F0450}"}
+						</span>
+					</Tooltip>
+				)}
 				<NativeBackendMark task={task} className="w-3.5 h-3.5 flex-shrink-0" testId="task-card-native-backend" />
 				<ForeignCodeMark task={task} className="w-3.5 h-3.5 flex-shrink-0" testId="task-card-foreign-code" />
 				{isCoordinator && (

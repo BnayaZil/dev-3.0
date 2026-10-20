@@ -50,6 +50,8 @@ export interface TaskQueryContext {
 	isHidden: boolean;
 	/** True while the task is hibernated or disconnected (`is:hibernated`). */
 	isHibernated: boolean;
+	/** True when the task is kept alive / auto-revived (`is:keepalive`). */
+	isKeptAlive: boolean;
 	/** The task's effective priority level (e.g. "p2"), lowercased. */
 	priorityValue: string;
 	/** Names of every space the task's project belongs to; [] when it is in none.
@@ -105,7 +107,7 @@ const FACET_DEFS: Record<FacetKey, FacetDef> = {
 	is: {
 		key: "is",
 		kind: "flag",
-		flagValues: ["attention", "home", "hidden", "hibernated"],
+		flagValues: ["attention", "home", "hidden", "hibernated", "keepalive"],
 		match: (ctx, v) => {
 			if (v === "attention") return ctx.isAttention;
 			// `home` is the computed no-space group, not a space called "Home" —
@@ -113,6 +115,7 @@ const FACET_DEFS: Record<FacetKey, FacetDef> = {
 			if (v === "home") return ctx.spaceNames !== null && ctx.spaceNames.length === 0;
 			if (v === "hidden") return ctx.isHidden;
 			if (v === "hibernated") return ctx.isHibernated;
+			if (v === "keepalive") return ctx.isKeptAlive;
 			return false;
 		},
 	},

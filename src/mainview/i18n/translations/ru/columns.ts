@@ -87,6 +87,7 @@ const columns = {
 	"filter.flag.port": "Есть открытый порт",
 	"filter.flag.hidden": "Скрыта из боковой панели",
 	"filter.flag.hibernated": "Заморожена или отключена",
+	"filter.flag.keepAlive": "Поддерживается активной",
 	"labels.moreLabels": "+{count} ещё",
 
 	// Notes

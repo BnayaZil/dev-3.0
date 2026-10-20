@@ -92,6 +92,7 @@ export function taskQueryContext(task: Task, resolver: FacetResolver): TaskQuery
 		isAttention: resolver.isAttentionFor(task),
 		isHidden: task.hidden === true,
 		isHibernated: isTaskNotRunning(task),
+		isKeptAlive: task.keepAlive?.enabled === true,
 		spaceNames: resolver.spaceNamesFor ? resolver.spaceNamesFor(task) : null,
 		prNumber: resolver.prNumberFor?.(task) ?? null,
 	};
@@ -102,7 +103,7 @@ export interface FilterFunnelCandidates {
 	priorityCandidates: FilterFunnelOption[];
 	/** Full ordered status vocabulary (built-in statuses + custom columns). */
 	statusCandidates: FilterFunnelOption[];
-	flagLabels: { attention: string; port: string; home: string; hidden: string; hibernated: string };
+	flagLabels: { attention: string; port: string; home: string; hidden: string; hibernated: string; keptAlive: string };
 	typeLabels: Record<TaskType | "standard", string>;
 }
 
@@ -131,6 +132,7 @@ export function buildFilterGroups(
 	let anyHome = false;
 	let anyHidden = false;
 	let anyHibernated = false;
+	let anyKeptAlive = false;
 
 	for (const task of tasks) {
 		for (const label of resolver.labelsFor(task)) {
@@ -164,6 +166,7 @@ export function buildFilterGroups(
 		if (resolver.hasPortFor(task)) anyPort = true;
 		if (task.hidden) anyHidden = true;
 		if (isTaskNotRunning(task)) anyHibernated = true;
+		if (task.keepAlive?.enabled) anyKeptAlive = true;
 	}
 
 	const priorityOptions = priorityCandidates.filter((c) => presentPriority.has(c.value.toLowerCase()));
@@ -187,6 +190,7 @@ export function buildFilterGroups(
 	// reachable while the very tasks it selects are out of the list.
 	if (anyHidden) flagOptions.push({ facet: "is", value: "hidden", label: flagLabels.hidden });
 	if (anyHibernated) flagOptions.push({ facet: "is", value: "hibernated", label: flagLabels.hibernated });
+	if (anyKeptAlive) flagOptions.push({ facet: "is", value: "keepalive", label: flagLabels.keptAlive });
 
 	const groups: FilterFunnelGroup[] = [
 		{ id: "priority", options: priorityOptions },

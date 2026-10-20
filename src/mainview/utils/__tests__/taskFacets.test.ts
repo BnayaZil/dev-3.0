@@ -143,7 +143,7 @@ describe("buildFilterGroups", () => {
 		{ facet: "priority", value: "P3", label: "P3 — Low" },
 		{ facet: "priority", value: "P4", label: "P4 — Lowest" },
 	];
-	const candidates = { priorityCandidates, statusCandidates, flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated" }, typeLabels: { standard: "Standard", coordinator: "Coordinator", "pr-review": "PR review" } };
+	const candidates = { priorityCandidates, statusCandidates, flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated", keptAlive: "Kept alive" }, typeLabels: { standard: "Standard", coordinator: "Coordinator", "pr-review": "PR review" } };
 
 	function resolverFor(): FacetResolver {
 		const labelsById: Record<string, Label[]> = {
@@ -201,6 +201,15 @@ describe("buildFilterGroups", () => {
 		expect(taskQueryContext(dead, resolverFor()).isHibernated).toBe(true);
 	});
 
+	it("offers is:keepalive only while a kept-alive task is in the pool", () => {
+		const flagsOf = (tasks: Task[]) => buildFilterGroups(tasks, resolverFor(), candidates)
+			.find((g) => g.id === "flags")?.options.map((o) => `${o.facet}:${o.value}`) ?? [];
+		expect(flagsOf([makeTask({ id: "plain", status: "in-progress" })])).not.toContain("is:keepalive");
+		const kept = makeTask({ id: "kept", status: "in-progress", keepAlive: { enabled: true } });
+		expect(flagsOf([kept])).toContain("is:keepalive");
+		expect(taskQueryContext(kept, resolverFor()).isKeptAlive).toBe(true);
+	});
+
 	it("drops the TYPES group when every task is standard", () => {
 		const groups = buildFilterGroups([makeTask({ id: "working" })], resolverFor(), candidates);
 		expect(groups.map((g) => g.id)).not.toContain("types");
@@ -245,7 +254,7 @@ describe("buildFilterGroups — SPACES group", () => {
 	const spaceCandidates = {
 		priorityCandidates: [{ facet: "priority" as const, value: "P2", label: "P2 — Normal" }],
 		statusCandidates: [{ facet: "status" as const, value: "in-progress", label: "Agent is Working" }],
-		flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated" },
+		flagLabels: { attention: "Needs attention", port: "Has running port", home: "Home", hidden: "Hidden from sidebar", hibernated: "Hibernated", keptAlive: "Kept alive" },
 		typeLabels: { standard: "Standard", coordinator: "Coordinator", "pr-review": "PR review" },
 	};
 

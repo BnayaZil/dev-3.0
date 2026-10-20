@@ -384,6 +384,7 @@ function ActiveTasksSidebar({
 				home: t("spaces.homeGroup"),
 				hidden: t("filter.flag.hidden"),
 				hibernated: t("filter.flag.hibernated"),
+				keptAlive: t("filter.flag.keepAlive"),
 			},
 			typeLabels: {
 				standard: t("createTask.taskTypeStandard"),

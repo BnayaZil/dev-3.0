@@ -57,6 +57,7 @@ function ctx(overrides: Partial<TaskQueryContext> = {}): TaskQueryContext {
 		isHidden: false,
 		isHibernated: false,
 		isAttention: false,
+		isKeptAlive: false,
 		prNumber: null,
 		...overrides,
 	};
@@ -258,6 +259,14 @@ describe("matchesTaskQuery — facets", () => {
 		expect(matchesTaskQuery(makeTask(), "is:hibernated", ctx({ isHibernated: false }))).toBe(false);
 		expect(matchesTaskQuery(makeTask(), "is:hibernated", ctx({ isHidden: true }))).toBe(false);
 		expect(matchesTaskQuery(makeTask(), "is:hidden", ctx({ isHibernated: true }))).toBe(false);
+	});
+
+	it("is:keepalive matches only a kept-alive task", () => {
+		expect(matchesTaskQuery(makeTask(), "is:keepalive", ctx({ isKeptAlive: true }))).toBe(true);
+		expect(matchesTaskQuery(makeTask(), "is:keepalive", ctx({ isKeptAlive: false }))).toBe(false);
+		// Its own axis: never implied by another flag.
+		expect(matchesTaskQuery(makeTask(), "is:keepalive", ctx({ isHibernated: true }))).toBe(false);
+		expect(matchesTaskQuery(makeTask(), "is:hibernated", ctx({ isKeptAlive: true }))).toBe(false);
 	});
 
 	it("is:hidden matches only a task hidden from the sidebar", () => {
