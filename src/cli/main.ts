@@ -11,6 +11,7 @@ import { handleReview } from "./commands/review";
 import { handleEvents } from "./commands/events";
 import { handleVents } from "./commands/vents";
 import { handleOverview } from "./commands/overview";
+import { handleKeepAlive } from "./commands/keep-alive";
 import { handleLabel } from "./commands/label";
 import { handleAutomations } from "./commands/automations";
 import { handleInstallHooks } from "./commands/install-hooks";
@@ -81,6 +82,10 @@ Commands:
   dev3 overview set "..." [--task <id>] Set task overview (one paragraph)
   dev3 overview show [--task <id>]      Show task overview (or description fallback)
   dev3 overview clear [--task <id>]     Remove task overview
+  dev3 keep-alive on [--task <id>]      Auto-revive this task's agent when its conversation dies
+  dev3 keep-alive off [--task <id>]     Stop auto-reviving this task
+  dev3 keep-alive status [--task <id>]  Show keep-alive state for a task
+  dev3 keep-alive list [--all]          List kept-alive tasks (current project, or --all)
   dev3 label list                       List project labels
   dev3 label create "name" [--color "#hex"]  Create label
   dev3 label delete <id>                Delete label
@@ -451,6 +456,8 @@ async function main(): Promise<void> {
 				return await handleVents(resolveFileArgs(parseArgs(rawArgs.slice(1))), socketPath);
 			case "overview":
 				return await handleOverview(subcommand, args, socketPath, context);
+				case "keep-alive":
+					return await handleKeepAlive(subcommand, args, socketPath, context);
 			case "label":
 				return await handleLabel(subcommand, args, socketPath, context);
 			case "automations":

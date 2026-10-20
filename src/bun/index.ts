@@ -727,6 +727,11 @@ startScheduledLaunchScheduler();
 const { startScheduledMessageScheduler } = await import("./scheduled-message-scheduler");
 startScheduledMessageScheduler();
 
+// Start the keep-alive watchdog — auto-revives tasks the user opted into when
+// their agent conversation dies (exit / rate limit / network). Runs headless too.
+const { startTaskKeepAliveScheduler } = await import("./task-keep-alive-scheduler");
+startTaskKeepAliveScheduler();
+
 // Start the focus tracker — accumulates real UI attention time per task (the
 // "your time" metric on the Productivity dashboard) from the foreground +
 // idle + active-context signals the renderer already reports. Runs headless too.

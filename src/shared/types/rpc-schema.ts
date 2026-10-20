@@ -1030,6 +1030,15 @@ export type AppRPCSchema = {
 				response: Task;
 			};
 			/**
+			 * Toggle "keep alive" (auto-revive) on a task ({@link Task.keepAlive}). When
+			 * on, the bun watchdog relaunches + resumes the task's agent if its
+			 * conversation dies. Off clears the state.
+			 */
+			setTaskKeepAlive: {
+				params: { taskId: string; projectId: string; enabled: boolean };
+				response: Task;
+			};
+			/**
 			 * Own or disown the code a task is about ({@link Task.foreignCode}). Clearing
 			 * it lets that branch's `.dev3` config and agent trust apply again — the
 			 * user's call, taken with a warning, and it takes effect on the next launch.

@@ -1,4 +1,5 @@
 import type { Project, Task, TaskType } from "../../shared/types";
+import type { KeepAliveState } from "../../shared/types/keep-alive";
 import { getTaskTitle, titleFromDescription } from "../../shared/types";
 import * as data from "../data";
 import { pushTaskUpdated, type BoardActor, type BoardPorts, type TaskOpResult } from "./types";
@@ -28,6 +29,8 @@ export interface TaskMetadataChange extends TitleDescriptionChange {
 	manualCompletion?: boolean;
 	overview?: string | null;
 	userOverview?: string | null;
+	/** Toggle "keep alive" (auto-revive): a fresh watching state, or null to clear. */
+	keepAlive?: KeepAliveState | null;
 }
 
 /**
@@ -112,6 +115,7 @@ export async function updateTaskMetadata(
 		if (change.taskType !== undefined) updates.taskType = change.taskType;
 		if (change.overview !== undefined) updates.overview = change.overview?.trim() || null;
 		if (change.userOverview !== undefined) updates.userOverview = change.userOverview?.trim() || null;
+		if (change.keepAlive !== undefined) updates.keepAlive = change.keepAlive;
 		const flipsCompletion = change.manualCompletion !== undefined && change.manualCompletion !== current.manualCompletion;
 		if (flipsCompletion) {
 			updates.manualCompletion = change.manualCompletion;

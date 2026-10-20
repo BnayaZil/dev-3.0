@@ -13,6 +13,7 @@ import { autoLaunchDeferral } from "../account-router";
 import { dispatchLifecycleEvent, removeLifecycleActor } from "../lifecycle/service";
 import { assertKnownLabelIds } from "../board-operations/labels";
 import { isScratchPlaceholderDescription, planTitleAndDescription, updateTaskMetadata, withoutUnchanged } from "../board-operations/task-metadata";
+import { nextKeepAliveState } from "../../shared/keep-alive";
 import { boardPorts } from "../board-operations/runtime";
 import { USER_ACTOR } from "../board-operations/types";
 import { getResourceUsage } from "../resource-monitor";
@@ -906,6 +907,14 @@ async function setTaskManualCompletion(params: { taskId: string; projectId: stri
 	return task;
 }
 
+async function setTaskKeepAlive(params: { taskId: string; projectId: string; enabled: boolean }): Promise<Task> {
+	log.info("→ setTaskKeepAlive", { taskId: params.taskId, enabled: params.enabled });
+	const project = await data.getProject(params.projectId);
+	const { task, verdict } = await updateTaskMetadata(boardPorts, project, params.taskId, { keepAlive: nextKeepAliveState(params.enabled) }, USER_ACTOR);
+	log.info("← setTaskKeepAlive done", { taskId: task.id, verdict });
+	return task;
+}
+
 /**
  * Completion dialogs still waiting for an answer, for a renderer that just
  * connected. `agentCompletionRequested` is a one-shot push, so a window that
@@ -1265,6 +1274,7 @@ export const taskLifecycleHandlers = {
 	toggleTaskWatch,
 	setTaskForeignCode,
 	setTaskManualCompletion,
+	setTaskKeepAlive,
 	scheduleTaskLaunch,
 	cancelScheduledLaunch,
 	startScheduledLaunchNow,

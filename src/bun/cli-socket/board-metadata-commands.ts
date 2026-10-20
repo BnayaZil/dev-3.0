@@ -1,6 +1,7 @@
 import type { Project, Task, TaskStatus, NoteSource } from "../../shared/types";
 import { replyToReviewComment, resolveReviewComment, resolveReviewCommentId, reopenReviewComment, type ReviewReplyAuthor } from "../../shared/review";
 import { formatStatus, getTaskTitle, STATUS_LABELS } from "../../shared/types";
+import { nextKeepAliveState } from "../../shared/keep-alive";
 import { DEFAULT_EVENT_LIMIT, DEFAULT_EVENT_WINDOW_MS, MAX_EVENT_LIMIT, formatMovementText, normalizeEventInstant, resolveEventIdPrefix, selectEvents, type BoardEvent, type BoardEventKind } from "../../shared/board-events";
 import * as data from "../data";
 import * as taskNotes from "../board-operations/task-notes";
@@ -36,6 +37,31 @@ export const boardMetadataHandlers: Record<string, Handler> = {
 	"overview.clear": async (params) => {
 		const { project, task } = await resolveTaskFromParams(params);
 		return (await updateTaskMetadata(boardPorts, project, task.id, { overview: null }, AGENT_ACTOR)).task;
+	},
+
+	"keepAlive.set": async (params) => {
+		const enabled = params.enabled === true || params.enabled === "true";
+		const { project, task } = await resolveTaskFromParams(params);
+		return (await updateTaskMetadata(boardPorts, project, task.id, { keepAlive: nextKeepAliveState(enabled) }, AGENT_ACTOR)).task;
+	},
+
+	"keepAlive.status": async (params) => {
+		const { task } = await resolveTaskFromParams(params);
+		return { taskId: task.id, seq: task.seq, title: getTaskTitle(task), status: task.status, keepAlive: task.keepAlive ?? null };
+	},
+
+	"keepAlive.list": async (params) => {
+		const projects = params.projectId
+			? [await data.getProject(params.projectId as string)]
+			: [...await data.loadProjects(), ...await data.loadVirtualProjects()];
+		const rows: Array<{ taskId: string; seq: number; title: string; status: TaskStatus; projectId: string; projectName: string; keepAlive: Task["keepAlive"] }> = [];
+		for (const project of projects) {
+			for (const task of await data.loadTasks(project)) {
+				if (!task.keepAlive?.enabled) continue;
+				rows.push({ taskId: task.id, seq: task.seq, title: getTaskTitle(task), status: task.status, projectId: project.id, projectName: project.name, keepAlive: task.keepAlive });
+			}
+		}
+		return rows;
 	},
 
 	"note.add": async (params) => {

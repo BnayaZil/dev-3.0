@@ -1,0 +1,3 @@
+Short: Keep tasks alive (auto-revive)
+
+New "Keep alive" option for a task: when its agent conversation dies — the process exits, a usage/rate limit is hit, or a network/proxy error kills it — dev3 relaunches and resumes the session automatically, with exponential backoff, a wait for a known rate-limit reset instead of hammering, and a retry cap that raises an attention badge when it finally gives up. It never touches a hibernated task or one that is legitimately waiting on you. Toggle it from the task's right-click menu or the inspector, filter the board with `is:keepalive`, or drive it from the CLI: `dev3 keep-alive on|off|status|list`.

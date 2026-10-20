@@ -7,6 +7,7 @@ import type { TaskType } from "./task-type";
 import type { Project } from "./project";
 import type { ScheduledLaunch } from "./agent-launch";
 import type { ScheduledMessage } from "./scheduled-messages";
+import type { KeepAliveState } from "./keep-alive";
 import type { SharedArtifact, SharedImage } from "./shared-media";
 import type { ScriptPlacement } from "./package-scripts";
 import type { MergeCompletionPromptState, PreparingStage, TaskSessionState } from "./task-lifecycle";
@@ -327,6 +328,16 @@ export interface Task {
 	 * older app versions see an ordinary task.
 	 */
 	taskType?: TaskType | null;
+	/**
+	 * "Keep alive" — the user asked dev3 to auto-revive this task's agent when its
+	 * conversation dies (process exited, usage/rate limit, network/proxy error). A
+	 * property of the task in the {@link Task.draft}/{@link Task.hibernated} class:
+	 * never a column, a kind, or an action, and inert on its own — only the bun
+	 * watchdog scheduler reads it, only for a task whose agent should be running,
+	 * and never for a hibernated one. Absent/null on every pre-existing task.
+	 * See {@link KeepAliveState}.
+	 */
+	keepAlive?: KeepAliveState | null;
 	/**
 	 * The Claude Code session this task was imported from, for a task created by
 	 * the conversation import. Nothing about the task behaves differently

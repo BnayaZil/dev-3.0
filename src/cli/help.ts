@@ -363,6 +363,35 @@ const COMMANDS: CommandHelp[] = [
 		],
 	},
 	{
+		name: "keep-alive",
+		summary: "Auto-revive a task's agent when its conversation dies (process exit, rate limit, network/proxy).",
+		subcommands: [
+			{
+				name: "on",
+				usage: "dev3 keep-alive on [--task <id>]",
+				summary: "Keep this task alive — dev3 relaunches and resumes it when the conversation dies.",
+				details: [
+					"Acts only while the agent should be running; never touches a hibernated task; waits for a known rate-limit reset instead of hammering. After repeated failures it stops and raises an attention badge.",
+				],
+			},
+			{
+				name: "off",
+				usage: "dev3 keep-alive off [--task <id>]",
+				summary: "Stop keeping this task alive.",
+			},
+			{
+				name: "status",
+				usage: "dev3 keep-alive status [--task <id>]",
+				summary: "Show the keep-alive state (watching / reviving / gave-up) for a task.",
+			},
+			{
+				name: "list",
+				usage: "dev3 keep-alive list [--all]",
+				summary: "List kept-alive tasks in the current project, or every project with --all.",
+			},
+		],
+	},
+	{
 		name: "label",
 		summary: "Manage project labels and task label assignments.",
 		subcommands: [
