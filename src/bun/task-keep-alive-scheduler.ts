@@ -1,4 +1,5 @@
 import type { Project, Task } from "../shared/types";
+import { getTaskTitle } from "../shared/types";
 import type { KeepAliveState } from "../shared/types/keep-alive";
 import { AGENT_TIME_STATUSES, TERMINAL_STATUSES } from "../shared/types/task";
 import {
@@ -11,12 +12,18 @@ import * as data from "./data";
 import { createLogger } from "./logger";
 import { getCachedRateLimitsReport } from "./rate-limit-monitor";
 import { getPushMessage, pushCliAttention, pushCliToast } from "./rpc-handlers";
-import { ResumeUnavailableError, resumeTaskSession, taskTerminalAlive } from "./rpc-handlers/tmux-pty";
+import { ResumeUnavailableError, resumeTaskSession } from "./rpc-handlers/tmux-pty";
+import { taskMainAgentAlive } from "./scheduled-message-author";
 
 const log = createLogger("task-keep-alive-scheduler");
 
-/** How often the watchdog checks kept-alive tasks for a dead conversation. */
-const TICK_INTERVAL_MS = 30_000;
+/**
+ * How often the watchdog checks kept-alive tasks. Deliberately gentle: keep-alive
+ * is for unattended, long-running tasks, so a few minutes before a revive costs
+ * nothing, and each tick loads every project's tasks and probes the process table
+ * per kept-alive task.
+ */
+const TICK_INTERVAL_MS = 5 * 60_000;
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let tickInFlight = false;
@@ -92,7 +99,9 @@ async function tickProject(project: Project): Promise<void> {
 
 /** Exported for unit tests — the per-task revive decision. */
 export async function evaluateTask(project: Project, task: Task, now: number): Promise<void> {
-	if (await taskTerminalAlive(task)) {
+	// Liveness is the AGENT PROCESS, not the tmux session: panes keep a shell after
+	// the agent exits (`keepShell`), so a live session is not a live agent.
+	if (await taskMainAgentAlive(task)) {
 		await resetToWatching(project, task);
 		return;
 	}
@@ -126,11 +135,11 @@ export async function evaluateTask(project: Project, task: Task, now: number): P
 	});
 
 	try {
-		const outcome = await resumeTaskSession(task.id, { refuseLive: true });
-		if (outcome.kind === "resumed") {
-			log.info("Keep-alive revived a task", { taskId: task.id.slice(0, 8), attempts });
-		}
-		// `already-running` → it came back on its own; next tick's alive branch resets it.
+		// No `refuseLive`: the dead agent leaves a live shell session, which that
+		// guard would mistake for a running task and refuse. `performTaskResume`
+		// tears the stale session down before relaunching.
+		await resumeTaskSession(task.id);
+		log.info("Keep-alive revived a task", { taskId: task.id.slice(0, 8), attempts });
 	} catch (err) {
 		if (err instanceof ResumeUnavailableError) {
 			// Nothing safe to reopen (no saved session, Codex transcript ambiguity).
@@ -187,14 +196,15 @@ async function patchKeepAlive(project: Project, task: Task, patch: Partial<KeepA
 }
 
 function notifyGaveUp(project: Project, task: Task, reason: string): void {
+	const title = getTaskTitle(task);
 	pushCliAttention({ taskId: task.id, projectId: project.id, reason: `Keep alive gave up — ${reason}` });
 	pushCliToast({
 		taskId: task.id,
 		projectId: project.id,
 		level: "error",
-		message: `Keep alive gave up on "${task.title}" — ${reason}`,
+		message: `Keep alive gave up on "${title}" — ${reason}`,
 		taskSeq: task.seq,
-		taskTitle: task.title,
+		taskTitle: title,
 		projectName: project.name,
 	});
 }

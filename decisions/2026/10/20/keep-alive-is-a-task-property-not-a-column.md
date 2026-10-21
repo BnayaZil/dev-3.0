@@ -20,9 +20,14 @@ seam that relaunches + resumes, and the rate-limit monitor already exposes
 Modeled it as a cross-cutting property `Task.keepAlive` (`src/shared/types/keep-alive.ts`),
 inert on its own, read only by the bun watchdog (`src/bun/task-keep-alive-scheduler.ts`)
 for tasks whose agent should be running (`AGENT_TIME_STATUSES`), never for a hibernated
-one. The watchdog calls `resumeTaskSession({ refuseLive: true })` with exponential
-backoff, defers to a known rate-limit `resetsAt`, caps retries then escalates via
-`pushCliAttention`/`pushCliToast`. Surfaced as the user's "column" intent without a
+one. Liveness is the **agent process**, not the tmux session: panes keep a shell after
+the agent exits (`keepShell`), so `taskTerminalAlive` ("session exists") would never see
+a dead agent — the watchdog uses `taskMainAgentAlive` (a live non-shell child of the main
+pane's launch script, reusing `scheduled-message-author`'s process-tree logic). On a dead
+agent it calls `resumeTaskSession` **without** `refuseLive` (the leftover shell session
+would otherwise look "live" and block the revive; `performTaskResume` tears the stale
+session down first), with exponential backoff, defers to a known rate-limit `resetsAt`,
+caps retries then escalates via `pushCliAttention`/`pushCliToast`. Surfaced as the user's "column" intent without a
 column: a passive card marker (accent while watching, danger when it gave up) and an
 `is:keepalive` board/sidebar filter. Toggled from the task context menu and the
 `setTaskKeepAlive` RPC / `dev3 keep-alive` CLI, both through `updateTaskMetadata`.
@@ -30,8 +35,12 @@ column: a passive card marker (accent while watching, danger when it gave up) an
 ## Risks
 False revive of an idle-on-purpose agent (mitigated: only `AGENT_TIME_STATUSES`, never
 awaiting-user/hibernated); thrashing a down provider (backoff + cap + `resetsAt`);
-Codex resume can refuse (treated as a failed attempt, then give up). MVP detects a dead
-process + rate limit; a still-alive-but-stalled agent is out of scope (no detector yet).
+Codex resume can refuse (treated as a failed attempt, then give up). The MVP trigger is
+the agent **process exiting** (a crash, or a provider/proxy/network error that kills it);
+a still-running agent that is merely stalled or paused at a usage limit is out of scope —
+the process is alive, so there is nothing to revive. The rate-limit `resetsAt` logic only
+times the retry after the process has already exited, so a relaunch doesn't hit an
+immediate block.
 
 ## Alternatives considered
 A real status/custom column (rejected — mutual exclusivity, §3 class rule); a new

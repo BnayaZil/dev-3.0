@@ -26,10 +26,12 @@ vi.mock("../data", () => ({
 	}),
 }));
 vi.mock("../rpc-handlers/tmux-pty", () => ({
-	taskTerminalAlive: vi.fn(async () => false),
 	resumeTaskSession: vi.fn(async () => ({ kind: "resumed", url: "ws://x", result: {} })),
 	ResumeUnavailableError: class ResumeUnavailableError extends Error {},
 }));
+// Liveness is the agent PROCESS, not the tmux session — mock it at that seam so a
+// test cannot pass by treating "session alive" (a leftover shell) as "agent alive".
+vi.mock("../scheduled-message-author", () => ({ taskMainAgentAlive: vi.fn(async () => false) }));
 vi.mock("../rate-limit-monitor", () => ({ getCachedRateLimitsReport: vi.fn(() => null) }));
 vi.mock("../rpc-handlers", () => ({
 	getPushMessage: vi.fn(() => vi.fn()),
@@ -38,7 +40,8 @@ vi.mock("../rpc-handlers", () => ({
 }));
 vi.mock("../logger", () => ({ createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
-import { taskTerminalAlive, resumeTaskSession, ResumeUnavailableError } from "../rpc-handlers/tmux-pty";
+import { resumeTaskSession, ResumeUnavailableError } from "../rpc-handlers/tmux-pty";
+import { taskMainAgentAlive } from "../scheduled-message-author";
 import { getCachedRateLimitsReport } from "../rate-limit-monitor";
 import { pushCliAttention, pushCliToast } from "../rpc-handlers";
 import { evaluateTask } from "../task-keep-alive-scheduler";
@@ -66,7 +69,7 @@ function lastPatch(): Partial<KeepAliveState> {
 beforeEach(() => {
 	vi.clearAllMocks();
 	H.patches = [];
-	vi.mocked(taskTerminalAlive).mockResolvedValue(false);
+	vi.mocked(taskMainAgentAlive).mockResolvedValue(false);
 	vi.mocked(resumeTaskSession).mockResolvedValue({ kind: "resumed", url: "ws://x", result: {} } as never);
 	vi.mocked(getCachedRateLimitsReport).mockReturnValue(null);
 });
@@ -76,13 +79,25 @@ describe("evaluateTask", () => {
 		const task = makeTask({ enabled: true, status: "watching", attempts: 0 });
 		H.task = task;
 		await evaluateTask(project, task, NOW);
-		expect(resumeTaskSession).toHaveBeenCalledWith(task.id, { refuseLive: true });
+		// Resumed WITHOUT refuseLive — the leftover shell session must not block it.
+		expect(resumeTaskSession).toHaveBeenCalledWith(task.id);
 		expect(lastPatch()).toMatchObject({ status: "reviving", attempts: 1, lastVerdict: "revived" });
 		expect(lastPatch().nextAttemptAt).toBeGreaterThan(NOW);
 	});
 
-	it("resets a recovering task to watching once it is alive again, without resuming", async () => {
-		vi.mocked(taskTerminalAlive).mockResolvedValue(true);
+	it("revives when the agent exited but a shell is still alive in the pane", async () => {
+		// The real keepShell case: the tmux session is alive (a shell), the agent is not.
+		// `taskMainAgentAlive` reports the agent gone, so the watchdog must still revive.
+		vi.mocked(taskMainAgentAlive).mockResolvedValue(false);
+		const task = makeTask({ enabled: true, status: "watching", attempts: 0 });
+		H.task = task;
+		await evaluateTask(project, task, NOW);
+		expect(resumeTaskSession).toHaveBeenCalledWith(task.id);
+		expect(lastPatch()).toMatchObject({ status: "reviving", lastVerdict: "revived" });
+	});
+
+	it("resets a recovering task to watching once its agent is alive again, without resuming", async () => {
+		vi.mocked(taskMainAgentAlive).mockResolvedValue(true);
 		const task = makeTask({ enabled: true, status: "reviving", attempts: 3 });
 		H.task = task;
 		await evaluateTask(project, task, NOW);

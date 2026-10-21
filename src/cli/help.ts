@@ -364,14 +364,14 @@ const COMMANDS: CommandHelp[] = [
 	},
 	{
 		name: "keep-alive",
-		summary: "Auto-revive a task's agent when its conversation dies (process exit, rate limit, network/proxy).",
+		summary: "Auto-revive a task's agent when its process exits (a crash, or a provider/proxy/network error that kills it).",
 		subcommands: [
 			{
 				name: "on",
 				usage: "dev3 keep-alive on [--task <id>]",
-				summary: "Keep this task alive — dev3 relaunches and resumes it when the conversation dies.",
+				summary: "Keep this task alive — dev3 relaunches and resumes it when the agent process exits.",
 				details: [
-					"Acts only while the agent should be running; never touches a hibernated task; waits for a known rate-limit reset instead of hammering. After repeated failures it stops and raises an attention badge.",
+					"Acts only while the agent should be running; never touches a hibernated task; waits for a known rate-limit reset before relaunching. It does NOT revive a still-running agent merely paused at a usage limit. After repeated failures it stops and raises an attention badge.",
 				],
 			},
 			{

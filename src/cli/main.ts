@@ -82,7 +82,7 @@ Commands:
   dev3 overview set "..." [--task <id>] Set task overview (one paragraph)
   dev3 overview show [--task <id>]      Show task overview (or description fallback)
   dev3 overview clear [--task <id>]     Remove task overview
-  dev3 keep-alive on [--task <id>]      Auto-revive this task's agent when its conversation dies
+  dev3 keep-alive on [--task <id>]      Auto-revive this task's agent when its process exits
   dev3 keep-alive off [--task <id>]     Stop auto-reviving this task
   dev3 keep-alive status [--task <id>]  Show keep-alive state for a task
   dev3 keep-alive list [--all]          List kept-alive tasks (current project, or --all)

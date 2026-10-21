@@ -6,12 +6,18 @@ import type { AgentRateLimitSnapshot, AgentRateLimitsReport, RateLimitSource } f
 // No side effects, no I/O — unit-tested in isolation. The bun scheduler
 // (`task-keep-alive-scheduler.ts`) wires these to real liveness and resume.
 
-/** Give up and escalate to the user after this many consecutive failed revives. */
+/**
+ * Give up and escalate to the user after this many consecutive failed revives.
+ * With the backoff below this is roughly a 2-hour window before giving up — long
+ * enough to outlast a transient outage, short enough that a truly dead task does
+ * not sit silently forever.
+ */
 export const KEEP_ALIVE_MAX_ATTEMPTS = 6;
-/** First backoff after a revive attempt; doubles each attempt up to the cap. */
-export const KEEP_ALIVE_BACKOFF_BASE_MS = 30_000;
+/** First backoff after a revive attempt; doubles each attempt up to the cap. One
+ *  tick (see the scheduler) is the floor anyway, so the base matches it. */
+export const KEEP_ALIVE_BACKOFF_BASE_MS = 5 * 60_000;
 /** Backoff ceiling so a provider that is down for real is not hammered. */
-export const KEEP_ALIVE_BACKOFF_MAX_MS = 5 * 60_000;
+export const KEEP_ALIVE_BACKOFF_MAX_MS = 30 * 60_000;
 /** Wait this long past a known rate-limit reset before trying again. */
 export const KEEP_ALIVE_RATE_LIMIT_BUFFER_MS = 60_000;
 /**

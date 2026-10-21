@@ -282,10 +282,10 @@ export default function TaskContextMenu({
 				checked: task.hidden,
 			},
 			{
+				// The label names the action it will perform, so a checkmark would be redundant.
 				id: "keepAlive",
 				label: task.keepAlive?.enabled ? t("task.keepAliveOff") : t("task.keepAliveOn"),
 				onSelect: handleToggleKeepAlive,
-				checked: task.keepAlive?.enabled === true,
 			},
 			{ id: "hibernate", label: t("task.hibernate"), onSelect: handleHibernate, disabled: !hasSession },
 		],

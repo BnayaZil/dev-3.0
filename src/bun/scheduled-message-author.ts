@@ -116,6 +116,19 @@ async function paneRunsAgent(task: Task, paneId: string): Promise<PaneRoot | nul
 }
 
 /**
+ * Is the task's MAIN pane running an agent right now? Ground truth for the
+ * keep-alive watchdog: the tmux SESSION survives an agent exit (panes launch with
+ * `keepShell: true`, so a shell takes the agent's place), so "session alive" is NOT
+ * "agent alive". This checks the process, seeing through that leftover shell.
+ * `false` when the pane is unknown or gone, i.e. a revive candidate.
+ */
+export async function taskMainAgentAlive(task: Task): Promise<boolean> {
+	const paneId = task.sessionState?.panes?.[0]?.paneId?.trim();
+	if (!paneId) return false;
+	return (await paneRunsAgent(task, paneId)) !== null;
+}
+
+/**
  * The pane the author lives in now, or a refusal. The recorded agent process still
  * running proves it outright. If it is gone, the only other acceptable answer is the
  * same conversation resumed somewhere NEW (another pane or tmux server) and running

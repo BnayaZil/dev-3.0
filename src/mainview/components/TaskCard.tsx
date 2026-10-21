@@ -892,13 +892,16 @@ function TaskCard({ task, project, dispatch, navigate, agents, onLaunchVariants,
 					<Tooltip
 						content={
 							task.keepAlive.status === "gave-up"
-								? t("task.keepAliveGaveUp")
+								? (task.keepAlive.gaveUpReason
+									? `${t("task.keepAliveGaveUp")} — ${task.keepAlive.gaveUpReason}`
+									: t("task.keepAliveGaveUp"))
 								: task.keepAlive.status === "reviving"
 									? t("task.keepAliveReviving")
 									: t("task.keepAliveWatching")
 						}
 					>
 						<span
+							aria-hidden
 							data-testid="task-card-keep-alive"
 							className={`flex-shrink-0 ${task.keepAlive.status === "gave-up" ? "text-danger" : "text-accent"}${task.keepAlive.status === "reviving" ? " motion-safe:animate-pulse" : ""}`}
 							style={{ fontFamily: "'JetBrainsMono Nerd Font Mono'" }}
