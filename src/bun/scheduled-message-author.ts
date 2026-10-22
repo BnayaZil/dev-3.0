@@ -115,17 +115,33 @@ async function paneRunsAgent(task: Task, paneId: string): Promise<PaneRoot | nul
 	return (table.childrenOf.get(root.rootPid) ?? []).some((pid) => !isShell(table, pid)) ? root : null;
 }
 
+/** What the keep-alive watchdog may conclude about a task's main agent. */
+export type MainAgentLiveness = "alive" | "exited" | "unknown";
+
+/** A bare interactive shell: what the launch script `exec`s once its agent has ended. */
+function isHandedOverShell(table: ProcessTable, pid: number): boolean {
+	const words = table.cmdlines.get(pid)?.trim().split(/\s+/) ?? [];
+	return words.length === 1 && isShell(table, pid);
+}
+
 /**
- * Is the task's MAIN pane running an agent right now? Ground truth for the
- * keep-alive watchdog: the tmux SESSION survives an agent exit (panes launch with
- * `keepShell: true`, so a shell takes the agent's place), so "session alive" is NOT
- * "agent alive". This checks the process, seeing through that leftover shell.
- * `false` when the pane is unknown or gone, i.e. a revive candidate.
+ * The task's MAIN agent, seen through the shell that outlives it (`keepShell`).
+ * `exited` is proof, not absence of evidence: the pane's launch script has been
+ * replaced by the interactive shell it hands over to only after the agent ends.
+ * Anything a probe cannot establish — no pane id, tmux or `ps` failing, a setup
+ * script still running, Windows (no `ps`) — is `unknown`, because the watchdog
+ * tears the terminal down on `exited`.
  */
-export async function taskMainAgentAlive(task: Task): Promise<boolean> {
+export async function taskMainAgentLiveness(task: Task): Promise<MainAgentLiveness> {
+	if (process.platform === "win32") return "unknown";
 	const paneId = task.sessionState?.panes?.[0]?.paneId?.trim();
-	if (!paneId) return false;
-	return (await paneRunsAgent(task, paneId)) !== null;
+	if (!paneId) return "unknown";
+	const root = await paneRoot(task, paneId);
+	if (!root) return "unknown";
+	const table = await processTable();
+	if (!table.cmdlines.has(root.rootPid)) return "unknown"; // `ps` failed, timed out, or raced the pane
+	if (isHandedOverShell(table, root.rootPid)) return "exited";
+	return (table.childrenOf.get(root.rootPid) ?? []).some((pid) => !isShell(table, pid)) ? "alive" : "unknown";
 }
 
 /**

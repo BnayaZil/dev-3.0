@@ -22,11 +22,16 @@ inert on its own, read only by the bun watchdog (`src/bun/task-keep-alive-schedu
 for tasks whose agent should be running (`AGENT_TIME_STATUSES`), never for a hibernated
 one. Liveness is the **agent process**, not the tmux session: panes keep a shell after
 the agent exits (`keepShell`), so `taskTerminalAlive` ("session exists") would never see
-a dead agent — the watchdog uses `taskMainAgentAlive` (a live non-shell child of the main
-pane's launch script, reusing `scheduled-message-author`'s process-tree logic). On a dead
-agent it calls `resumeTaskSession` **without** `refuseLive` (the leftover shell session
-would otherwise look "live" and block the revive; `performTaskResume` tears the stale
-session down first), with exponential backoff, defers to a known rate-limit `resetsAt`,
+a dead agent. The watchdog asks `taskMainAgentLiveness` (`scheduled-message-author.ts`),
+which answers `alive` / `exited` / `unknown`. `exited` needs proof: the launch script has
+been replaced by the bare shell it `exec`s only after the agent ends. Every probe that
+cannot answer (`ps` failed or timed out, tmux unreadable, a setup script still running,
+Windows with no `ps`) is `unknown`, and `unknown` with a live terminal does nothing —
+reviving tears the terminal down, so it never acts on a guess. On `exited` it ends the
+leftover terminal and waits for it to go (`tearDownTaskTerminal` in `tmux-pty/resume.ts`:
+a relaunch racing the fire-and-forget `kill-session` would only reattach to it through
+`new-session -A`), then calls `resumeTaskSession({ refuseLive: true })`, which also proves
+the teardown landed. With exponential backoff it defers to a known rate-limit `resetsAt`,
 caps retries then escalates via `pushCliAttention`/`pushCliToast`. Surfaced as the user's "column" intent without a
 column: a passive card marker (accent while watching, danger when it gave up) and an
 `is:keepalive` board/sidebar filter. Toggled from the task context menu and the
@@ -40,7 +45,9 @@ the agent **process exiting** (a crash, or a provider/proxy/network error that k
 a still-running agent that is merely stalled or paused at a usage limit is out of scope —
 the process is alive, so there is nothing to revive. The rate-limit `resetsAt` logic only
 times the retry after the process has already exited, so a relaunch doesn't hit an
-immediate block.
+immediate block. On Windows only a terminal that is gone altogether is revived — a dead
+agent in a live PowerShell stays `unknown`. A program the user starts in the shell an
+exited agent left behind is ended by the revive; that shell is not where people work.
 
 ## Alternatives considered
 A real status/custom column (rejected — mutual exclusivity, §3 class rule); a new

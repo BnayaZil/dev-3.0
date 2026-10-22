@@ -16,7 +16,7 @@ import { collectProcessInfo } from "../port-scanner";
 import { spawn } from "../spawn";
 import { nativeTaskPanesState } from "../native-task-panes";
 import { tmux } from "../tmux";
-import { captureScheduledMessageAuthor, resolveScheduledMessageAuthorPane } from "../scheduled-message-author";
+import { captureScheduledMessageAuthor, resolveScheduledMessageAuthorPane, taskMainAgentLiveness } from "../scheduled-message-author";
 import type { PaneSessionEntry, Task } from "../../shared/types";
 
 /** A synthetic machine: processes plus the tmux panes (root pid each) on one server generation. */
@@ -241,5 +241,51 @@ describe("resolveScheduledMessageAuthorPane — where the reminder may land", ()
 		expect(await resolveScheduledMessageAuthorPane(native, b)).toEqual({ ok: true, paneId: "pane-2" });
 		agentExits(200);
 		expect((await resolveScheduledMessageAuthorPane(native, b)).ok).toBe(false);
+	});
+});
+
+describe("taskMainAgentLiveness — what the keep-alive watchdog may conclude", () => {
+	it("sees the main agent running", async () => {
+		expect(await taskMainAgentLiveness(task())).toBe("alive");
+	});
+
+	it("proves an exit once the launch script handed the pane to a bare shell", async () => {
+		agentExits(100);
+		expect(await taskMainAgentLiveness(task())).toBe("exited");
+	});
+
+	it("still proves the exit when the leftover shell runs a prompt helper", async () => {
+		agentExits(100);
+		procs.push({ pid: 150, ppid: 100, args: "/Users/me/.cache/gitstatus/gitstatusd-darwin-arm64 -G v1.5.4" });
+		expect(await taskMainAgentLiveness(task())).toBe("exited");
+	});
+
+	it("is unknown, never exited, while a setup script runs ahead of the agent", async () => {
+		procs = procs.filter((p) => p.ppid !== 100);
+		procs.find((p) => p.pid === 100)!.args = "/opt/homebrew/bin/zsh /tmp/dev3-task-startup.sh";
+		procs.push({ pid: 160, ppid: 100, args: "/opt/homebrew/bin/zsh /tmp/dev3-task-setup.sh" });
+		expect(await taskMainAgentLiveness(task())).toBe("unknown");
+	});
+
+	it("is unknown when `ps` fails or times out (an empty table)", async () => {
+		vi.mocked(collectProcessInfo).mockResolvedValue({ tree: new Map(), cmdlines: new Map(), resources: new Map() });
+		expect(await taskMainAgentLiveness(task())).toBe("unknown");
+	});
+
+	it("is unknown when tmux cannot pin the pane or no pane id is stored", async () => {
+		vi.mocked(pinTaskPane).mockResolvedValue({ ok: false, reason: "pane-absent", detail: "gone" } as never);
+		expect(await taskMainAgentLiveness(task())).toBe("unknown");
+		expect(await taskMainAgentLiveness(task([pane(null, "conv-a")]))).toBe("unknown");
+	});
+
+	it("is unknown on Windows, which has no `ps` to read the process table from", async () => {
+		const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+		Object.defineProperty(process, "platform", { value: "win32" });
+		try {
+			agentExits(100);
+			expect(await taskMainAgentLiveness(task())).toBe("unknown");
+		} finally {
+			Object.defineProperty(process, "platform", platform);
+		}
 	});
 });

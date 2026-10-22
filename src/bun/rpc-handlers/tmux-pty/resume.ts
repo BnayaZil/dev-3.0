@@ -8,10 +8,10 @@ import { getAgentAdapter } from "../../../shared/agent-adapters/registry";
 import { agentKey } from "../../../shared/agent-adapters/families";
 import * as repoConfig from "../../repo-config";
 import { resolveResumableSessionIds } from "../../agent-transcripts";
-import { DEFAULT_TMUX_SOCKET, taskSessionName } from "../../tmux";
+import { DEFAULT_TMUX_SOCKET, taskSessionName, tmux } from "../../tmux";
 import { dev3TaskTempPath } from "../../temp-paths";
 import { taskTerminalBackendIdentity } from "../../task-terminal-backend";
-import { nativeTaskPanesAlive } from "../../native-task-panes";
+import { nativeTaskPanesAlive, stopNativeTaskPanes } from "../../native-task-panes";
 import type { ResumePaneMode, ResumePaneReport, ResumeUnavailableReason, TaskResumeResult } from "../../../shared/agent-resume";
 import { getPushMessage, buildCmdScript, log, writeLaunchScript } from "../shared-pure";
 import { applyAgentHooksToCommand, ensureAgentTrust, launchTaskPty } from "./task-launch";
@@ -132,6 +132,29 @@ export async function taskTerminalAlive(task: Task): Promise<boolean> {
 	return taskTerminalBackendIdentity(task) === "native"
 		? nativeTaskPanesAlive(task.id)
 		: pty.tmuxSessionExists(task.id, task.tmuxSocket ?? DEFAULT_TMUX_SOCKET);
+}
+
+const TEARDOWN_WAIT_MS = 5_000;
+const TEARDOWN_POLL_MS = 100;
+
+/**
+ * End a task's terminal and wait until the backend agrees it is gone. A relaunch
+ * racing a fire-and-forget `kill-session` attaches to the dying session
+ * (`new-session -A`) instead of starting the agent. Callers confirm with `refuseLive`.
+ */
+export async function tearDownTaskTerminal(task: Task): Promise<void> {
+	if (taskTerminalBackendIdentity(task) === "native") {
+		if (pty.hasSession(task.id)) await pty.destroySessionAwaited(task.id);
+		else await stopNativeTaskPanes(task.id);
+		return;
+	}
+	const socket = task.tmuxSocket ?? DEFAULT_TMUX_SOCKET;
+	// Exactly one kill: a second one still in flight could land on the fresh session.
+	if (pty.hasSession(task.id)) pty.destroySession(task.id, socket);
+	else await tmux.killSession(taskSessionName(task.id), { socket, bestEffort: true });
+	for (let waited = 0; waited < TEARDOWN_WAIT_MS && await pty.tmuxSessionExists(task.id, socket); waited += TEARDOWN_POLL_MS) {
+		await new Promise((resolve) => setTimeout(resolve, TEARDOWN_POLL_MS));
+	}
 }
 
 /**

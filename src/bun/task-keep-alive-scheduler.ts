@@ -12,8 +12,8 @@ import * as data from "./data";
 import { createLogger } from "./logger";
 import { getCachedRateLimitsReport } from "./rate-limit-monitor";
 import { getPushMessage, pushCliAttention, pushCliToast } from "./rpc-handlers";
-import { ResumeUnavailableError, resumeTaskSession } from "./rpc-handlers/tmux-pty";
-import { taskMainAgentAlive } from "./scheduled-message-author";
+import { ResumeUnavailableError, resumeTaskSession, taskTerminalAlive, tearDownTaskTerminal } from "./rpc-handlers/tmux-pty";
+import { taskMainAgentLiveness } from "./scheduled-message-author";
 
 const log = createLogger("task-keep-alive-scheduler");
 
@@ -101,10 +101,15 @@ async function tickProject(project: Project): Promise<void> {
 export async function evaluateTask(project: Project, task: Task, now: number): Promise<void> {
 	// Liveness is the AGENT PROCESS, not the tmux session: panes keep a shell after
 	// the agent exits (`keepShell`), so a live session is not a live agent.
-	if (await taskMainAgentAlive(task)) {
+	const liveness = await taskMainAgentLiveness(task);
+	if (liveness === "alive") {
 		await resetToWatching(project, task);
 		return;
 	}
+	// Reviving tears the terminal down, so a guess never may: without proof the
+	// agent exited, only a terminal that is gone altogether counts as a death.
+	const terminalAlive = await taskTerminalAlive(task);
+	if (liveness === "unknown" && terminalAlive) return;
 	const ka = task.keepAlive!;
 	if (ka.status === "gave-up") return; // escalated to the user; waits for them
 	if (ka.nextAttemptAt != null && now < ka.nextAttemptAt) return; // backoff / rate-limit window
@@ -135,10 +140,16 @@ export async function evaluateTask(project: Project, task: Task, now: number): P
 	});
 
 	try {
-		// No `refuseLive`: the dead agent leaves a live shell session, which that
-		// guard would mistake for a running task and refuse. `performTaskResume`
-		// tears the stale session down before relaunching.
-		await resumeTaskSession(task.id);
+		// The exited agent left its shell holding the session; a relaunch would only
+		// reattach to it (`new-session -A`), so it goes first — and `refuseLive` then
+		// proves it is gone before anything new starts.
+		if (terminalAlive) await tearDownTaskTerminal(task);
+		const outcome = await resumeTaskSession(task.id, { refuseLive: true });
+		if (outcome.kind === "already-running") {
+			await patchKeepAlive(project, task, { lastVerdict: "error" });
+			log.warn("Keep-alive could not clear the leftover terminal; retrying later", { taskId: task.id.slice(0, 8), attempts });
+			return;
+		}
 		log.info("Keep-alive revived a task", { taskId: task.id.slice(0, 8), attempts });
 	} catch (err) {
 		if (err instanceof ResumeUnavailableError) {
