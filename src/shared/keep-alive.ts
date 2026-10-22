@@ -8,11 +8,13 @@ import type { AgentRateLimitSnapshot, AgentRateLimitsReport, RateLimitSource } f
 
 /**
  * Give up and escalate to the user after this many consecutive failed revives.
- * With the backoff below this is roughly a 2-hour window before giving up — long
- * enough to outlast a transient outage, short enough that a truly dead task does
- * not sit silently forever.
+ * With the backoff below this is roughly a 24-hour (one-day) window before giving
+ * up — long enough to outlast an overnight outage, a weekend, or a machine that
+ * was asleep, short enough that a truly dead task does not sit silently forever.
+ * The window is counted in ATTEMPTS, not wall-clock, so a sleeping machine does
+ * not burn through it — it simply pauses until the scheduler ticks again.
  */
-export const KEEP_ALIVE_MAX_ATTEMPTS = 6;
+export const KEEP_ALIVE_MAX_ATTEMPTS = 50;
 /** First backoff after a revive attempt; doubles each attempt up to the cap. One
  *  tick (see the scheduler) is the floor anyway, so the base matches it. */
 export const KEEP_ALIVE_BACKOFF_BASE_MS = 5 * 60_000;
